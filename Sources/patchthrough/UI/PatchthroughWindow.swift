@@ -699,6 +699,13 @@ final class PatchthroughWindowController: NSObject, NSWindowDelegate {
             w.delegate = self
             w.contentView = NSHostingView(rootView: PatchthroughRootView(store: store))
 
+            // Title-bar icon. Title bars only show an icon for windows that
+            // represent a file, so represent the app bundle itself — which
+            // also gives ⌘-click-the-title path navigation for free — and
+            // swap in the mark at title-bar size.
+            w.representedURL = Bundle.main.bundleURL
+            w.standardWindowButton(.documentIconButton)?.image = AppIcon.titlebarImage()
+
             // Restore the last frame; otherwise open on whichever screen has
             // the pointer — with several displays, centering on the "main"
             // screen puts the window somewhere the user isn't looking.

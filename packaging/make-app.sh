@@ -32,53 +32,13 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 # --- icon: render the in-code vector mark to a proper .icns ---------------
 
-say "rendering icon…"
+say "building icns from the approved Signal appiconset…"
 ICONSET="$(mktemp -d)/patchthrough.iconset"
 mkdir -p "$ICONSET"
-cat > /tmp/pt-render-icns.swift <<'EOF'
-import AppKit
-// Must match Sources/patchthrough/UI/AppIcon.swift.
-func icon(_ side: CGFloat) -> NSImage {
-    NSImage(size: NSSize(width: side, height: side), flipped: false) { _ in
-        let s = side / 1024.0
-        let inset = 100 * s
-        let plate = NSRect(x: inset, y: inset, width: side - inset*2, height: side - inset*2)
-        let radius = plate.width * 0.225
-        NSColor(calibratedRed: 0.11, green: 0.11, blue: 0.12, alpha: 1).setFill()
-        NSBezierPath(roundedRect: plate, xRadius: radius, yRadius: radius).fill()
-        let hl = NSBezierPath(roundedRect: plate.insetBy(dx: 3*s, dy: 3*s), xRadius: radius-3*s, yRadius: radius-3*s)
-        NSColor.white.withAlphaComponent(0.06).setStroke(); hl.lineWidth = 6*s; hl.stroke()
-        func pt(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
-            let u = plate.width / 24.0
-            return NSPoint(x: plate.minX + x*u, y: plate.minY + (24.0 - y)*u)
-        }
-        let bar = NSBezierPath(); bar.move(to: pt(8.5,15.5)); bar.line(to: pt(19,5))
-        bar.lineWidth = 2.4 * plate.width/24.0; bar.lineCapStyle = .round
-        NSColor.white.setStroke(); bar.stroke()
-        let accent = NSColor(calibratedRed: 0.91, green: 0.45, blue: 0.32, alpha: 1)
-        for (f,t) in [((5.0,12.0),(3.0,14.0)), ((9.0,16.0),(7.0,18.0)), ((13.0,20.0),(11.5,21.5))] {
-            let tick = NSBezierPath(); tick.move(to: pt(f.0,f.1)); tick.line(to: pt(t.0,t.1))
-            tick.lineWidth = 2.0 * plate.width/24.0; tick.lineCapStyle = .round
-            accent.setStroke(); tick.stroke()
-        }
-        return true
-    }
-}
-let outDir = CommandLine.arguments[1]
-for (px, name) in [(16,"16x16"),(32,"16x16@2x"),(32,"32x32"),(64,"32x32@2x"),
-                   (128,"128x128"),(256,"128x128@2x"),(256,"256x256"),(512,"256x256@2x"),
-                   (512,"512x512"),(1024,"512x512@2x")] {
-    let img = icon(CGFloat(px))
-    var rect = NSRect(x: 0, y: 0, width: px, height: px)
-    guard let cg = img.cgImage(forProposedRect: &rect, context: nil, hints: nil) else { continue }
-    let rep = NSBitmapImageRep(cgImage: cg)
-    rep.size = NSSize(width: px, height: px)
-    try! rep.representation(using: .png, properties: [:])!
-        .write(to: URL(fileURLWithPath: "\(outDir)/icon_\(name).png"))
-}
-print("iconset written")
-EOF
-swift /tmp/pt-render-icns.swift "$ICONSET"
+for f in packaging/design/AppIcon-signal.appiconset/icon_*.png; do
+  base="$(basename "$f")"
+  cp "$f" "$ICONSET/${base/-at-2x/@2x}"   # iconutil expects @2x naming
+done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/patchthrough.icns"
 
 # --- bundle plist ----------------------------------------------------------
