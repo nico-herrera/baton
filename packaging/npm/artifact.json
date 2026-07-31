@@ -1,0 +1,9 @@
+{
+  "_comment": "Pinned release artifact. The npm postinstall installs exactly this and nothing else — no 'latest' resolution. Regenerate with packaging/make-dist.sh and bump the npm version alongside it.",
+  "version": "1.0.1",
+  "repo": "nico-herrera/patchthrough",
+  "tag": "v1.0.1",
+  "file": "patchthrough-1.0.1-darwin-arm64.tar.gz",
+  "sha256": "372faa07c1df0e771eaab4f505a9933fe0248a1667c8b4d4fc8c5310152e95a8",
+  "teamId": "DAB6FR7R2R"
+}
