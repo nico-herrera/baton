@@ -308,19 +308,19 @@ final class AppController {
                 switch target.kind {
                 case .appClipboard(let appName):
                     notifyUser(
-                        title: "patchthrough — handed to \(appName)",
+                        title: "Patchthrough — handed to \(appName)",
                         body: Config.autoPaste()
                             ? "Pasting into a new chat…"
                             : "Prompt + transcript are on your clipboard. Paste (⌘V) into a new chat."
                     )
                 case .fileOpen(let appName):
                     notifyUser(
-                        title: "patchthrough — handed to \(appName)",
+                        title: "Patchthrough — handed to \(appName)",
                         body: "Transcript attached. Instructions are on your clipboard — paste (⌘V) and send."
                     )
                 case .folderOpen(let appName):
                     notifyUser(
-                        title: "patchthrough — session folder → \(appName)",
+                        title: "Patchthrough — session folder → \(appName)",
                         body: "Instructions are on your clipboard — paste (⌘V) once the workspace opens."
                     )
                 default: break
@@ -339,7 +339,7 @@ final class AppController {
         do {
             try Handoff.stage(session: session, inRepo: repo)
         } catch {
-            notifyUser(title: "patchthrough — handoff failed", body: "\(error)")
+            notifyUser(title: "Patchthrough — handoff failed", body: "\(error)")
             return
         }
         Handoff.launchInTerminal(
@@ -387,7 +387,7 @@ final class AppController {
             FileHandle.standardError.write(Data("● recording → \(newSession.dir.path)\n".utf8))
         } catch {
             FileHandle.standardError.write(Data("recording start failed: \(error)\n".utf8))
-            notifyUser(title: "patchthrough — recording failed", body: "\(error)")
+            notifyUser(title: "Patchthrough — recording failed", body: "\(error)")
             return
         }
 

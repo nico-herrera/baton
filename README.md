@@ -1,8 +1,8 @@
-# patchthrough
+# Patchthrough
 
 Record the meeting. We'll patch you through to your agent.
 
-patchthrough is a macOS menu-bar app that records your meetings (your mic and the
+Patchthrough is a macOS menu-bar app that records your meetings (your mic and the
 other side of the call as two separate tracks), transcribes them **entirely
 on-device**, and then hands the transcript to whatever coding agent you use —
 Claude Code, Copilot, Codex, Kimi, opencode, cursor-agent — as a primed
@@ -22,7 +22,7 @@ handoff is the product: the gap between *"we agreed on it in the meeting"* and
 
 ## How it works
 
-1. **Click the patchthrough in the menu bar → Start recording.** Your mic and
+1. **Click the Patchthrough in the menu bar → Start recording.** Your mic and
    everything the Mac plays are captured as two separate CAF tracks. Two
    tracks on purpose: speech models do better on clean single-source audio,
    and mic-vs-system gives you two-party diarization — `me` vs `them` — with
@@ -43,7 +43,7 @@ lossy summary is exactly where requirements get quietly dropped — plus a promp
 that tells it to extract work items, decisions, and ambiguities, ask before
 guessing at garbled terms, and not touch any code until you've agreed the plan.
 
-The transcript lands in `.meeting/` inside your repo, which patchthrough adds to the
+The transcript lands in `.meeting/` inside your repo, which Patchthrough adds to the
 repo's **local** git excludes — meeting content can't end up in a commit by
 accident, and your `.gitignore` isn't touched.
 
@@ -99,10 +99,10 @@ Optional config at `~/.config/patchthrough/config.json`:
 
 Two kinds of destination, both auto-detected:
 
-**Terminal sessions** — patchthrough looks for agent CLIs in the usual install
+**Terminal sessions** — Patchthrough looks for agent CLIs in the usual install
 locations: `claude`, `copilot`, `codex`, `kimi`, `opencode`, `cursor-agent`.
 Most launch as `<agent> "<prompt>"`; opencode uses `opencode run`; kimi takes
-no initial prompt, so patchthrough stages it on your clipboard.
+no initial prompt, so Patchthrough stages it on your clipboard.
 
 **GUIs** (`patchthrough hand <target> --gui`, or straight from the menu bar) — each
 app gets the best door it actually exposes:
@@ -118,13 +118,13 @@ app gets the best door it actually exposes:
 
 Where an app exposes no prompt API, the clipboard payload is deliberately
 self-contained — instructions first, verbatim transcript below. Add
-`"auto_paste": true` to the config and patchthrough finishes the job itself,
+`"auto_paste": true` to the config and Patchthrough finishes the job itself,
 synthesizing ⌘N + ⌘V after the app opens (one-time Accessibility grant; you
 still press send).
 
-And the universal door: the patchthrough window (menu bar → Open patchthrough) shows every
+And the universal door: the Patchthrough window (menu bar → Open Patchthrough) shows every
 session with a **drag chip** — drag the transcript file into any chat input
-anywhere, including apps patchthrough has no button for.
+anywhere, including apps Patchthrough has no button for.
 
 Adding an agent or GUI target is a one-line entry in
 `Sources/patchthrough/Handoff.swift`.
@@ -161,7 +161,7 @@ supply-chain posture is deliberate:
 
 ## Credits
 
-patchthrough began as a detached rebuild of [quill](https://github.com/digimata/quill)
+Patchthrough began as a detached rebuild of [quill](https://github.com/digimata/quill)
 by digimata — the recording and transcription core descends from it (MIT, see
 LICENSE). Transcription is [Parakeet TDT](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2)
 via [FluidAudio](https://github.com/FluidInference/FluidAudio)'s Core ML port.

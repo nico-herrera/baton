@@ -92,8 +92,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
 <dict>
     <key>CFBundleExecutable</key>       <string>patchthrough</string>
     <key>CFBundleIdentifier</key>       <string>com.nicoherrera.patchthrough</string>
-    <key>CFBundleName</key>             <string>patchthrough</string>
-    <key>CFBundleDisplayName</key>      <string>patchthrough</string>
+    <key>CFBundleName</key>             <string>Patchthrough</string>
+    <key>CFBundleDisplayName</key>      <string>Patchthrough</string>
     <key>CFBundleIconFile</key>         <string>patchthrough</string>
     <key>CFBundlePackageType</key>      <string>APPL</string>
     <key>CFBundleShortVersionString</key> <string>$VERSION</string>
@@ -101,9 +101,9 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>LSMinimumSystemVersion</key>   <string>15.0</string>
     <key>LSUIElement</key>              <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>patchthrough records your microphone during meetings so you can transcribe them later. Audio never leaves this Mac.</string>
+    <string>Patchthrough records your microphone during meetings so you can transcribe them later. Audio never leaves this Mac.</string>
     <key>NSAudioCaptureUsageDescription</key>
-    <string>patchthrough records system audio (the other side of your meetings) so you can transcribe them later. Audio never leaves this Mac.</string>
+    <string>Patchthrough records system audio (the other side of your meetings) so you can transcribe them later. Audio never leaves this Mac.</string>
 </dict>
 </plist>
 EOF

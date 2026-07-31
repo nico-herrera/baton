@@ -51,7 +51,7 @@ final class MenuBarController {
         menu.addItem(handoffItem)
 
         let openWindow = NSMenuItem(
-            title: "Open patchthrough…",
+            title: "Open Patchthrough…",
             action: #selector(openWindowClicked),
             keyEquivalent: "b"
         )
@@ -67,7 +67,7 @@ final class MenuBarController {
         menu.addItem(.separator())
 
         let quit = NSMenuItem(
-            title: "Quit patchthrough",
+            title: "Quit Patchthrough",
             action: #selector(quitClicked),
             keyEquivalent: "q"
         )

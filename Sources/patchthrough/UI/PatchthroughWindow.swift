@@ -400,7 +400,7 @@ final class PatchthroughWindowController: NSObject, NSWindowDelegate {
                 backing: .buffered,
                 defer: false
             )
-            w.title = "patchthrough"
+            w.title = "Patchthrough"
             w.isReleasedWhenClosed = false
             w.delegate = self
             w.contentView = NSHostingView(rootView: PatchthroughRootView(store: store))

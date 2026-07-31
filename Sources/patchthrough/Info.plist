@@ -5,10 +5,10 @@
     <key>CFBundleIdentifier</key>
     <string>com.nicoherrera.patchthrough</string>
     <key>CFBundleName</key>
-    <string>patchthrough</string>
+    <string>Patchthrough</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>patchthrough records your microphone during meetings so you can transcribe them later. Audio never leaves this Mac.</string>
+    <string>Patchthrough records your microphone during meetings so you can transcribe them later. Audio never leaves this Mac.</string>
     <key>NSAudioCaptureUsageDescription</key>
-    <string>patchthrough records system audio (the other side of your meetings) so you can transcribe them later. Audio never leaves this Mac.</string>
+    <string>Patchthrough records system audio (the other side of your meetings) so you can transcribe them later. Audio never leaves this Mac.</string>
 </dict>
 </plist>
