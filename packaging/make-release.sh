@@ -73,7 +73,7 @@ EOF
 
 ( cd "$PKG" && shasum -a 256 baton install.sh > SHA256SUMS )
 
-cp packaging/INSTALL.md "$PKG/README.md" 2>/dev/null || true
+cp README.md "$PKG/README.md"
 
 # --- tar -------------------------------------------------------------------
 
