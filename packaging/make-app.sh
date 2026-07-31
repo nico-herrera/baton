@@ -60,6 +60,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundleVersion</key>          <string>$BUILD</string>
     <key>LSMinimumSystemVersion</key>   <string>15.0</string>
     <key>LSUIElement</key>              <true/>
+    <key>NSAccentColorName</key>        <string>AccentColor</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Patchthrough records your microphone during meetings so you can transcribe them later. Audio never leaves this Mac.</string>
     <key>NSAudioCaptureUsageDescription</key>
@@ -69,6 +70,13 @@ cat > "$APP/Contents/Info.plist" <<EOF
 EOF
 
 cp "$BIN" "$APP/Contents/MacOS/patchthrough"
+
+# App accent colour (Signal). macOS takes sidebar selection, toggles and
+# prominent buttons from the bundle's compiled AccentColor — SwiftUI .tint
+# alone cannot recolour sidebar selection.
+actool packaging/design/Assets.xcassets --compile "$APP/Contents/Resources" \
+  --platform macosx --minimum-deployment-target 15.0 \
+  --output-partial-info-plist /dev/null >/dev/null
 
 # --- sign ------------------------------------------------------------------
 

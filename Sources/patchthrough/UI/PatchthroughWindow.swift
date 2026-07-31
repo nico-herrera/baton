@@ -1,9 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// Observable model behind the main window: the session list, the current
-/// recording state, the target project folder, and the dispatch actions.
-/// All UI state lives here; the views are dumb.
+/// Observable model behind the main window. All UI state lives here; the
+/// views are dumb. Layout and behaviour follow APP_REDESIGN_HANDOFF.md
+/// (round 11a window, 10d settings) — deviations are bugs.
 @MainActor
 final class SessionStore: ObservableObject {
 
@@ -19,18 +19,14 @@ final class SessionStore: ObservableObject {
 
         enum Status { case ready, pending, broken }
 
+        /// First thing said — the only human-readable identifier a session has.
+        var firstLine: String { segments.first?.text ?? "" }
+
         var statusSymbol: String {
             switch status {
             case .ready:   return cleanStop ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
             case .pending: return "clock.arrow.circlepath"
             case .broken:  return "exclamationmark.triangle.fill"
-            }
-        }
-        var statusColor: Color {
-            switch status {
-            case .ready:   return cleanStop ? .secondary : .orange
-            case .pending: return .orange
-            case .broken:  return .red
             }
         }
         var subtitle: String {
@@ -49,8 +45,15 @@ final class SessionStore: ObservableObject {
         let text: String
     }
 
-    /// A place a transcript can be sent. Unifies terminal agents and GUI
-    /// targets so the window renders them as one concept in two groups.
+    /// Consecutive same-speaker segments, grouped. The transcript's only
+    /// structure is who's talking; the layout leans entirely on it.
+    struct Turn: Identifiable {
+        let id: Int
+        let speaker: String
+        let time: String          // time of the first utterance in the turn
+        let lines: [String]
+    }
+
     struct Destination: Identifiable {
         let id: String
         let label: String
@@ -58,8 +61,6 @@ final class SessionStore: ObservableObject {
         let isTerminal: Bool
         let needsRepo: Bool
 
-        /// Menu-length labels ("Copilot — VS Code") don't fit a button grid;
-        /// the full label stays available as a tooltip.
         var shortLabel: String { label.components(separatedBy: " — ").first ?? label }
     }
 
@@ -84,7 +85,6 @@ final class SessionStore: ObservableObject {
 
     var selected: Item? { items.first { $0.id == selection } }
 
-    /// Sessions matching the search box, by name or transcript content.
     var visibleItems: [Item] {
         guard !search.isEmpty else { return items }
         let q = search.lowercased()
@@ -94,7 +94,6 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    /// Sessions bucketed into Today / Yesterday / older, for section headers.
     var groupedItems: [(title: String, items: [Item])] {
         let cal = Calendar.current
         var buckets: [(String, [Item])] = []
@@ -132,6 +131,18 @@ final class SessionStore: ObservableObject {
         return terminal + gui
     }
 
+    /// Most-used first. Cold start falls back to discovery order, whose first
+    /// entry is the first installed terminal agent.
+    var rankedDestinations: [Destination] { DestinationRanking.rank(destinations) }
+    var topDestination: Destination? { rankedDestinations.first }
+
+    /// The repo chip's display name — just the folder, full path in tooltip.
+    var repoDisplayName: String? {
+        let trimmed = repoPath.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        return URL(fileURLWithPath: NSString(string: trimmed).expandingTildeInPath).lastPathComponent
+    }
+
     private static let folderFormat: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy.MM.dd-HHmm"
@@ -147,7 +158,6 @@ final class SessionStore: ObservableObject {
 
         items = dirs.map { dir in
             let name = dir.lastPathComponent
-            // Folder names carry the timestamp; strip any "-2" collision suffix.
             let stamp = name.split(separator: "-").prefix(2).joined(separator: "-")
             let date = Self.folderFormat.date(from: stamp)
 
@@ -166,7 +176,6 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    /// Parse transcript.md lines of the form `**[0:00] me:** text` into rows.
     static func parseSegments(_ dir: URL) -> [Segment] {
         guard let text = try? String(
             contentsOf: dir.appendingPathComponent("transcript.md"), encoding: .utf8
@@ -186,6 +195,21 @@ final class SessionStore: ObservableObject {
             ))
         }
         return out
+    }
+
+    static func groupedTurns(_ segments: [Segment]) -> [Turn] {
+        var turns: [Turn] = []
+        for seg in segments {
+            if let last = turns.last, last.speaker == seg.speaker {
+                turns[turns.count - 1] = Turn(
+                    id: last.id, speaker: last.speaker, time: last.time,
+                    lines: last.lines + [seg.text]
+                )
+            } else {
+                turns.append(Turn(id: seg.id, speaker: seg.speaker, time: seg.time, lines: [seg.text]))
+            }
+        }
+        return turns
     }
 
     // MARK: - Dispatch
@@ -211,7 +235,7 @@ final class SessionStore: ObservableObject {
                 return
             }
             Handoff.launchInTerminal(agent: match.agent, prompt: Handoff.prompt(for: sess), cwd: repo)
-            lastAction = "opened Terminal in \(repo.lastPathComponent) → \(name)"
+            lastAction = "patched through to \(name) in \(repo.lastPathComponent)"
         } else {
             let id = String(dest.id.dropFirst(4))
             guard let target = Handoff.installedGuiTargets().first(where: { $0.id == id }) else { return }
@@ -222,16 +246,16 @@ final class SessionStore: ObservableObject {
                     ? "\(dest.shortLabel) opened — pasting into a new chat…"
                     : "\(dest.shortLabel) opened — prompt + transcript on your clipboard (⌘V)"
             case .fileOpen:
-                lastAction = "\(dest.shortLabel) opened with the transcript attached — instructions on your clipboard (⌘V)"
+                lastAction = "\(dest.shortLabel) opened with the transcript attached (⌘V for instructions)"
             case .folderOpen:
-                lastAction = "session folder opened in \(dest.shortLabel) — instructions on your clipboard (⌘V)"
+                lastAction = "session folder opened in \(dest.shortLabel) (⌘V for instructions)"
             default:
-                lastAction = "opened \(dest.shortLabel) in \(repo?.lastPathComponent ?? "?")"
+                lastAction = "patched through to \(dest.shortLabel) in \(repo?.lastPathComponent ?? "?")"
             }
         }
+        DestinationRanking.record(dest.id)
     }
 
-    /// The file used for drag-out: the self-describing handoff document.
     func dragFile(for item: Item) -> URL? {
         guard let sess = try? Handoff.resolveSession(named: item.id, root: root) else { return nil }
         return Handoff.exportHandoffFile(for: sess)
@@ -261,14 +285,14 @@ final class SessionStore: ObservableObject {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Developer", isDirectory: true)
+            .appendingPathComponent("coding", isDirectory: true)
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         repoPath = url.path
         return url
     }
 }
 
-// MARK: - Root view
+// MARK: - Root view (round 11a)
 
 struct PatchthroughRootView: View {
     @ObservedObject var store: SessionStore
@@ -276,48 +300,79 @@ struct PatchthroughRootView: View {
     var body: some View {
         NavigationSplitView {
             sessionList
-                .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
+                .navigationSplitViewColumnWidth(252)
         } detail: {
             detail
         }
         .frame(minWidth: 860, minHeight: 660)
+        .background(Color.ptWindow)
+        .tint(.ptSignal)
+        .preferredColorScheme(.dark)
         .toolbar { toolbarContent }
         .searchable(text: $store.search, placement: .sidebar, prompt: "Search transcripts")
         .sheet(isPresented: $store.showSettings) { SettingsView(store: store) }
+        .background(  // ⌘⇧C stays as a command with no toolbar slot
+            Button("") { if let i = store.selected { store.copyTranscript(i) } }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+                .opacity(0)
+                .frame(width: 0, height: 0)
+        )
         .onAppear { store.refresh() }
     }
+
+    // MARK: Toolbar — mark + title left; Drag, split button, gear right.
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
-            Button {
-                store.onToggleRecording?()
-            } label: {
-                Label(
-                    store.isRecording ? "Stop recording · \(store.elapsed)" : "Record",
-                    systemImage: store.isRecording ? "stop.circle.fill" : "record.circle"
-                )
-                .monospacedDigit()
+            HStack(spacing: 8) {
+                PatchthroughMarkView(weight: 1.6)
+                    .frame(width: 17, height: 17)
+                    .foregroundStyle(Color.ptText2)
+                Text("Patchthrough")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.ptText2)
             }
-            .help(store.isRecording ? "Stop and transcribe" : "Start recording mic + system audio")
-            .keyboardShortcut("r", modifiers: .command)
-            .tint(store.isRecording ? .red : nil)
         }
         ToolbarItemGroup {
             if let item = store.selected, item.status == .ready {
-                Button { store.copyTranscript(item) } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
+                Label("Drag", systemImage: "arrow.up.doc.on.clipboard")
+                    .labelStyle(.titleAndIcon)
+                    .onDrag {
+                        guard let url = store.dragFile(for: item) else { return NSItemProvider() }
+                        return NSItemProvider(contentsOf: url) ?? NSItemProvider()
+                    }
+                    .help("Drag the transcript into any chat")
+            }
+
+            Menu {
+                let ranked = store.rankedDestinations
+                let counts = DestinationRanking.counts()
+                let top3 = Array(ranked.prefix(3))
+                Section("Most used") {
+                    ForEach(top3) { dest in
+                        destItem(dest, count: counts[dest.id] ?? 0)
+                    }
                 }
-                .help("Copy the transcript to the clipboard")
-                .keyboardShortcut("c", modifiers: [.command, .shift])
+                let rest = ranked.dropFirst(3)
+                Section("Terminal") {
+                    ForEach(rest.filter(\.isTerminal)) { dest in destItem(dest, count: 0) }
+                }
+                Section("App") {
+                    ForEach(rest.filter { !$0.isTerminal }) { dest in destItem(dest, count: 0) }
+                }
+            } label: {
+                Label("Patch through to \(store.topDestination?.shortLabel ?? "…")",
+                      systemImage: "arrow.right")
+                    .labelStyle(.titleAndIcon)
+            } primaryAction: {
+                if let item = store.selected, let d = store.topDestination {
+                    store.send(item, to: d)
+                }
             }
-            Button { store.refresh() } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
-            }
-            .keyboardShortcut("r", modifiers: [.command, .shift])
-            Button { NSWorkspace.shared.open(store.root) } label: {
-                Label("Recordings folder", systemImage: "folder")
-            }
+            .buttonStyle(.borderedProminent)
+            .disabled(store.selected?.status != .ready)
+
             Button { store.showSettings = true } label: {
                 Label("Settings", systemImage: "gearshape")
             }
@@ -325,37 +380,71 @@ struct PatchthroughRootView: View {
         }
     }
 
-    // MARK: Sidebar
+    @ViewBuilder
+    private func destItem(_ dest: SessionStore.Destination, count: Int) -> some View {
+        Button {
+            if let item = store.selected { store.send(item, to: dest) }
+        } label: {
+            // Never show a count of 0 — omit the suffix instead.
+            if count > 0 {
+                Label("\(dest.shortLabel)   \(count)×", systemImage: dest.symbol)
+            } else {
+                Label(dest.shortLabel, systemImage: dest.symbol)
+            }
+        }
+    }
+
+    // MARK: Sidebar — time + first transcript line.
 
     private var sessionList: some View {
         List(selection: $store.selection) {
             ForEach(store.groupedItems, id: \.title) { group in
                 Section(group.title) {
                     ForEach(group.items) { item in
-                        HStack(spacing: 8) {
-                            Image(systemName: item.statusSymbol)
-                                .foregroundStyle(item.statusColor)
-                                .font(.caption)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(timeLabel(item))
-                                    .font(.system(.body, design: .rounded))
-                                Text(item.subtitle)
-                                    .font(.caption)
-                                    .foregroundStyle(item.status == .ready ? .secondary : item.statusColor)
-                            }
-                        }
-                        .padding(.vertical, 1)
-                        .tag(item.id)
-                        .help(item.id)
+                        sidebarRow(item)
                     }
                 }
             }
         }
         .listStyle(.sidebar)
+        .tint(.ptSignal)
+        .scrollContentBackground(.hidden)
+        .background(Color.ptSidebar)
         .overlay {
-            if store.visibleItems.isEmpty {
-                emptySidebar
+            if store.visibleItems.isEmpty { emptySidebar }
+        }
+    }
+
+    @ViewBuilder
+    private func sidebarRow(_ item: SessionStore.Item) -> some View {
+        if item.status == .ready {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Text(timeLabel(item)).font(.system(size: 13, weight: .semibold))
+                    Text(item.duration).font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Text(item.firstLine)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
+            .padding(.vertical, 3)
+            .tag(item.id)
+        } else {
+            // Pending/broken keep their status glyph and subtitle.
+            HStack(spacing: 8) {
+                Image(systemName: item.statusSymbol)
+                    .foregroundStyle(item.status == .broken ? Color.ptSignal : Color.ptText3)
+                    .font(.caption)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(timeLabel(item)).font(.system(size: 13, weight: .semibold))
+                    Text(item.subtitle).font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 3)
+            .tag(item.id)
         }
     }
 
@@ -368,13 +457,12 @@ struct PatchthroughRootView: View {
         VStack(spacing: 6) {
             Image(systemName: store.search.isEmpty ? "waveform" : "magnifyingglass")
                 .font(.largeTitle)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Color.ptText4)
             Text(store.search.isEmpty ? "No recordings" : "No matches")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.ptText3)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.clear)
     }
 
     // MARK: Detail
@@ -383,32 +471,32 @@ struct PatchthroughRootView: View {
     private var detail: some View {
         if let item = store.selected, item.status == .ready {
             VStack(spacing: 0) {
-                dragHeader(item)
-                Divider()
+                detailHeader(item)
+                Divider().overlay(Color.ptHairline)
                 transcriptView(item)
-                Divider()
-                handoffBar(item)
+                if let action = store.lastAction {
+                    Divider().overlay(Color.ptHairline)
+                    Label(action, systemImage: "checkmark.circle")
+                        .font(.caption).foregroundStyle(Color.ptText3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14).padding(.vertical, 6)
+                }
             }
+            .background(Color.ptWindow)
         } else if let item = store.selected, item.status == .pending {
-            placeholder(
-                symbol: "clock.arrow.circlepath",
-                title: "Transcribing \(item.id)",
-                detail: "This usually takes about 20 seconds per hour of audio. The list updates when it lands."
-            )
+            placeholder(symbol: "clock.arrow.circlepath",
+                        title: "Transcribing \(item.id)",
+                        detail: "About 20 seconds per hour of audio. The list updates when it lands.")
         } else if let item = store.selected, item.status == .broken {
-            placeholder(
-                symbol: "exclamationmark.triangle",
-                title: "\(item.id) was interrupted",
-                detail: "No meta.json, so nothing will pick it up. The audio files are still in the session folder."
-            )
+            placeholder(symbol: "exclamationmark.triangle",
+                        title: "\(item.id) was interrupted",
+                        detail: "No meta.json, so nothing will pick it up. The audio files are still in the session folder.")
         } else {
-            placeholder(
-                symbol: "waveform.badge.mic",
-                title: store.items.isEmpty ? "No recordings yet" : "Nothing selected",
-                detail: store.items.isEmpty
-                    ? "Press ⌘R or click Record. Your mic and everything your Mac plays are captured as two tracks, then transcribed on-device."
-                    : "Pick a session on the left."
-            )
+            placeholder(symbol: "waveform.badge.mic",
+                        title: store.items.isEmpty ? "No recordings yet" : "Nothing selected",
+                        detail: store.items.isEmpty
+                            ? "Start a recording from the menu bar. Your mic and everything your Mac plays are captured as two tracks, then transcribed on-device."
+                            : "Pick a session on the left.")
         }
     }
 
@@ -416,143 +504,109 @@ struct PatchthroughRootView: View {
         VStack(spacing: 10) {
             Image(systemName: symbol)
                 .font(.system(size: 38, weight: .light))
-                .foregroundStyle(.tertiary)
-            Text(title).font(.title3)
+                .foregroundStyle(Color.ptText4)
+            Text(title).font(.title3).foregroundStyle(Color.ptText)
             Text(detail)
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.ptText3)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 380)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.ptWindow)
     }
 
-    /// The universal handoff: a draggable chip. Every chat app accepts a file
-    /// dropped on its input, so drag works even for apps with no button.
-    private func dragHeader(_ item: SessionStore.Item) -> some View {
+    /// One row: session id (mono), stats, and the target repo as just the
+    /// folder name on the trailing edge — full path in the tooltip.
+    private func detailHeader(_ item: SessionStore.Item) -> some View {
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(item.id).font(.system(.callout, design: .monospaced))
-                Text("\(item.duration) · \(item.words) words · \(item.segments.count) segments")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            Text(item.id).font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(Color.ptText3)
+            Text("\(item.duration) · \(item.words) words · \(item.segments.count) segments")
+                .font(.system(size: 12))
+                .foregroundStyle(Color.ptText4)
             Spacer()
-            Label("drag into any chat", systemImage: "arrow.up.doc.on.clipboard")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
-                .onDrag {
-                    guard let url = store.dragFile(for: item) else { return NSItemProvider() }
-                    return NSItemProvider(contentsOf: url) ?? NSItemProvider()
-                }
-                .help("Drag the transcript file into Claude, ChatGPT, Kimi, or anything else that takes a file")
+            Button {
+                _ = store.pickRepo()
+            } label: {
+                Label(store.repoDisplayName ?? "choose project", systemImage: "folder")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.ptText3)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 9).padding(.vertical, 4)
+            .background(Color.ptRaised, in: RoundedRectangle(cornerRadius: 6))
+            .help(store.repoPath.isEmpty ? "Choose the project repo-based handoffs start in" : store.repoPath)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.vertical, 9)
     }
 
+    // MARK: Transcript — me right on a ground, them left and bare.
+
     private func transcriptView(_ item: SessionStore.Item) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(item.segments) { seg in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(seg.time)
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 42, alignment: .trailing)
-                        Label {
-                            Text(seg.speaker).font(.caption.weight(.semibold))
-                        } icon: {
-                            Image(systemName: seg.speaker == "me" ? "mic.fill" : "speaker.wave.2.fill")
-                                .font(.system(size: 9))
+        GeometryReader { geo in
+            ScrollView {
+                VStack(spacing: 18) {
+                    ForEach(SessionStore.groupedTurns(item.segments)) { turn in
+                        let isMe = turn.speaker == "me"
+                        VStack(alignment: isMe ? .trailing : .leading, spacing: isMe ? 7 : 8) {
+                            HStack(spacing: 8) {
+                                if isMe { Text(turn.time).monoCaption() }
+                                Text(turn.speaker.uppercased())
+                                    .font(.system(size: 10.5, weight: .semibold))
+                                    .tracking(0.9)
+                                    .foregroundStyle(isMe ? Color.ptSignalLit : Color(hex: 0x8C887E))
+                                if !isMe { Text(turn.time).monoCaption() }
+                            }
+                            ForEach(turn.lines, id: \.self) { line in
+                                Text(highlighted(line))
+                                    .font(.system(size: 14.5))
+                                    .lineSpacing(4)
+                                    .foregroundStyle(isMe ? Color.ptText : Color.ptText2)
+                                    .textSelection(.enabled)
+                                    .multilineTextAlignment(.leading)
+                                    .padding(isMe
+                                        ? EdgeInsets(top: 13, leading: 16, bottom: 13, trailing: 16)
+                                        : EdgeInsets())
+                                    .background(isMe ? Color.ptSurface : .clear,
+                                                in: RoundedRectangle(cornerRadius: 11))
+                            }
                         }
-                        .foregroundStyle(seg.speaker == "me" ? Color.accentColor : Color.purple)
-                        .frame(width: 58, alignment: .leading)
-                        Text(highlighted(seg.text))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        // 78% cap: trailing alignment can only offset an item
+                        // narrower than the line — a larger cap makes both
+                        // speakers span the column and the left/right rule
+                        // vanishes.
+                        .frame(maxWidth: geo.size.width * 0.78,
+                               alignment: isMe ? .trailing : .leading)
+                        .frame(maxWidth: .infinity, alignment: isMe ? .trailing : .leading)
+                        .padding(isMe ? .leading : .trailing, 22)
                     }
                 }
+                .padding(16)
             }
-            .padding(14)
         }
     }
 
-    /// Bold the search term inside transcript lines so hits are findable.
     private func highlighted(_ text: String) -> AttributedString {
         var out = AttributedString(text)
         guard !store.search.isEmpty else { return out }
         var cursor = out.startIndex
         while let r = out[cursor...].range(of: store.search, options: .caseInsensitive) {
             out[r].inlinePresentationIntent = .stronglyEmphasized
-            out[r].backgroundColor = .yellow.opacity(0.25)
+            out[r].backgroundColor = Color.ptSignal.opacity(0.3)
             cursor = r.upperBound
             if cursor >= out.endIndex { break }
         }
         return out
     }
-
-    private func handoffBar(_ item: SessionStore.Item) -> some View {
-        let dests = store.destinations
-        let terminal = dests.filter(\.isTerminal)
-        let gui = dests.filter { !$0.isTerminal }
-        let columns = [GridItem(.adaptive(minimum: 132), spacing: 6)]
-
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Label("Project", systemImage: "folder.badge.gearshape")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .labelStyle(.titleAndIcon)
-                TextField("~/Developer/your-project", text: $store.repoPath)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.caption, design: .monospaced))
-                Button("Choose…") { _ = store.pickRepo() }
-            }
-
-            if !terminal.isEmpty {
-                destinationGroup("Terminal session", terminal, columns: columns, item: item)
-            }
-            if !gui.isEmpty {
-                destinationGroup("App", gui, columns: columns, item: item)
-            }
-
-            if let action = store.lastAction {
-                Label(action, systemImage: "checkmark.circle")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(12)
-    }
-
-    private func destinationGroup(
-        _ title: String, _ dests: [SessionStore.Destination],
-        columns: [GridItem], item: SessionStore.Item
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
-                ForEach(dests) { dest in
-                    Button {
-                        store.send(item, to: dest)
-                    } label: {
-                        Label(dest.shortLabel, systemImage: dest.symbol)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .help(dest.label)
-                }
-            }
-        }
-    }
 }
 
-// MARK: - Settings
+// MARK: - Settings (round 10d)
 
-/// The config file, as a form. Every knob here was previously only reachable
-/// by hand-editing ~/.config/patchthrough/config.json, which nobody you hand
-/// this to is going to do.
+/// Fixed frame, no scrolling. Four groups: Recordings, Transcription,
+/// Patch through, After each transcript. Every toggle carries a one-line
+/// subtitle stating its tradeoff.
 struct SettingsView: View {
     @ObservedObject var store: SessionStore
     @Environment(\.dismiss) private var dismiss
@@ -566,52 +620,67 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Form {
-                Section {
+            header
+            Divider().overlay(Color.ptHairline)
+
+            VStack(alignment: .leading, spacing: 18) {
+                section("Recordings") {
                     HStack {
-                        TextField("Recordings folder", text: $recordingsDir, prompt: Text("~/Recordings"))
-                            .font(.system(.body, design: .monospaced))
+                        TextField("", text: $recordingsDir, prompt: Text("~/Recordings"))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
                         Button("Choose…") { chooseFolder() }
                     }
-                } header: {
-                    Text("Where recordings go")
-                } footer: {
-                    Text("Takes effect for the next recording.")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
 
-                Section("Transcription") {
-                    Toggle("Transcribe automatically after each recording", isOn: $transcribe)
-                    Toggle("Echo cancellation on the mic", isOn: $voiceProcessing)
+                section("Transcription") {
+                    toggleRow("Transcribe automatically after each recording",
+                              subtitle: "On-device, ~20s per hour of audio",
+                              isOn: $transcribe)
+                    toggleRow("Echo cancellation on the mic",
+                              subtitle: "Cleaner on speakers, thinner on headphones",
+                              isOn: $voiceProcessing)
                 }
 
-                Section {
-                    Toggle("Paste automatically after a clipboard handoff", isOn: $autoPaste)
-                } header: {
-                    Text("Handoff")
-                } footer: {
-                    Text("Synthesizes ⌘N then ⌘V once the app opens. Needs Accessibility permission; it never presses send.")
-                        .font(.caption).foregroundStyle(.secondary)
+                section("Patch through") {
+                    toggleRow("Paste automatically after a clipboard handoff",
+                              subtitle: "Types ⌘N then ⌘V. Never presses send.",
+                              isOn: $autoPaste)
+                    // Accessibility requirement, attached to the row it gates.
+                    HStack(spacing: 8) {
+                        Image(systemName: "hand.raised")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.ptSignalLit)
+                        Text("Requires the Accessibility permission")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Color.ptText2)
+                        Spacer()
+                        Button("Grant now") {
+                            NSWorkspace.shared.open(URL(string:
+                                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                        }
+                        .controlSize(.small)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(Color.ptSignal.opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
                 }
 
-                Section {
-                    TextField("Command", text: $onStop, prompt: Text("my-hook"))
-                        .font(.system(.body, design: .monospaced))
-                } header: {
-                    Text("Run after each transcript")
-                } footer: {
+                section("After each transcript") {
+                    TextField("", text: $onStop, prompt: Text("my-hook"))
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
                     Text("Runs with the session folder as its only argument. Leave empty for none.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.system(size: 11.5)).foregroundStyle(Color.ptText4)
                 }
 
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red).font(.caption)
+                        .foregroundStyle(Color.ptSignalLit).font(.caption)
                 }
             }
-            .formStyle(.grouped)
+            .padding(18)
 
-            Divider()
+            Divider().overlay(Color.ptHairline)
             HStack {
                 Button("Reveal config file") {
                     NSWorkspace.shared.activateFileViewerSelecting([Config.configPath])
@@ -626,8 +695,53 @@ struct SettingsView: View {
             }
             .padding(12)
         }
-        .frame(width: 540, height: 560)
+        .frame(width: 560)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(Color.ptWindow)
+        .tint(.ptSignal)
+        .preferredColorScheme(.dark)
         .onAppear(perform: load)
+    }
+
+    /// Header carries the mark and the config path — the file being edited is
+    /// never a mystery.
+    private var header: some View {
+        HStack {
+            HStack(spacing: 8) {
+                PatchthroughMarkView(weight: 1.6)
+                    .frame(width: 16, height: 16)
+                    .foregroundStyle(Color.ptText2)
+                Text("Settings").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.ptText)
+            }
+            Spacer()
+            Text("~/.config/patchthrough/config.json")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color.ptText4)
+        }
+        .padding(.horizontal, 18).padding(.vertical, 12)
+    }
+
+    private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(0.6)
+                .foregroundStyle(Color.ptText4)
+                .textCase(.uppercase)
+            content()
+        }
+    }
+
+    private func toggleRow(_ title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 13)).foregroundStyle(Color.ptText)
+                Text(subtitle).font(.system(size: 11.5)).foregroundStyle(Color.ptText4)
+            }
+        }
+        .toggleStyle(.switch)
+        .controlSize(.small)
     }
 
     private func load() {
@@ -652,8 +766,6 @@ struct SettingsView: View {
     }
 
     private func save() {
-        // Only write keys that differ from the default, so the config stays a
-        // list of deliberate choices rather than a dump of everything.
         let trimmedDir = recordingsDir.trimmingCharacters(in: .whitespaces)
         let trimmedHook = onStop.trimmingCharacters(in: .whitespaces)
         do {
@@ -664,7 +776,7 @@ struct SettingsView: View {
                 "auto_paste": autoPaste ? true : nil,
                 "on_stop": trimmedHook.isEmpty ? nil : trimmedHook,
             ])
-            store.lastAction = "settings saved to \(Config.configPath.lastPathComponent)"
+            store.lastAction = "settings saved"
             dismiss()
         } catch {
             self.error = "Couldn't write the config: \(error.localizedDescription)"
@@ -694,23 +806,16 @@ final class PatchthroughWindowController: NSObject, NSWindowDelegate {
                 defer: false
             )
             w.title = "Patchthrough"
-            w.titlebarAppearsTransparent = false
+            // The toolbar carries the mark + wordmark; a second title is noise.
+            w.titleVisibility = .hidden
             w.isReleasedWhenClosed = false
             w.delegate = self
             w.contentView = NSHostingView(rootView: PatchthroughRootView(store: store))
 
-            // Title-bar icon. Title bars only show an icon for windows that
-            // represent a file, so represent the app bundle itself — which
-            // also gives ⌘-click-the-title path navigation for free — and
-            // swap in the mark at title-bar size.
             w.representedURL = Bundle.main.bundleURL
             w.standardWindowButton(.documentIconButton)?.image = AppIcon.titlebarImage()
 
-            // Restore the last frame; otherwise open on whichever screen has
-            // the pointer — with several displays, centering on the "main"
-            // screen puts the window somewhere the user isn't looking.
-            if let saved = UserDefaults.standard.string(forKey: Self.frameKey),
-               !saved.isEmpty {
+            if let saved = UserDefaults.standard.string(forKey: Self.frameKey), !saved.isEmpty {
                 w.setFrame(NSRectFromString(saved), display: false)
             } else if let screen = NSScreen.screens.first(where: {
                 NSMouseInRect(NSEvent.mouseLocation, $0.frame, false)
@@ -726,10 +831,6 @@ final class PatchthroughWindowController: NSObject, NSWindowDelegate {
             store.showSettings = true
         }
 
-        // An .accessory app can show a window but can't properly own focus or
-        // a menu bar. Promote to .regular while the window is up and drop back
-        // when it closes, so it behaves like a normal app while visible and
-        // stays out of the Dock the rest of the time.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
@@ -752,9 +853,6 @@ final class PatchthroughWindowController: NSObject, NSWindowDelegate {
         UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: Self.frameKey)
     }
 
-    /// Back to accessory when the window closes: no Dock icon, menu bar only.
-    /// The daemon keeps running either way — closing the window never stops a
-    /// recording.
     func windowWillClose(_ notification: Notification) {
         saveFrame()
         NSApp.setActivationPolicy(.accessory)

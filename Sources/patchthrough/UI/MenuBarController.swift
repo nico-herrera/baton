@@ -1,30 +1,46 @@
 import AppKit
 
-/// Status bar item in the top-right of the menu bar. Shows recording state at
-/// a glance and provides the only persistent control surface for the daemon
-/// (since we run as `.accessory` — no dock icon, no main window).
-///
-/// The mark and its rules come from packaging/design/DESIGN.md: a socket ring
-/// and patch cord on a 24×24 grid, regular weight (1.6) at rest, heavy (2.1)
-/// while patching (transcribing). The recording dot (#D2371B) is the only
-/// colour in the product and is composited as a separate non-template layer —
-/// baking it into the template art would get it flattened to black.
+/// Status bar item. Art per the logo handoff (regular at rest, heavy while
+/// patching, Signal dot while recording); menu per APP_REDESIGN_HANDOFF.md
+/// round 10e — leads with the verb, promotes the top-ranked destination to a
+/// one-click item, and the state header carries the session count.
 @MainActor
 final class MenuBarController {
+
+    /// Everything the menu needs to render handoff state, built by the
+    /// controller so this class never touches the store directly.
+    struct HandoffMenuModel {
+        struct Entry {
+            let id: String        // "cli:claude" / "gui:claude-cowork"
+            let label: String
+            let symbol: String
+            let count: Int
+        }
+        let mostUsed: [Entry]     // top 3 by use
+        let terminal: [Entry]     // remainder, CLI
+        let app: [Entry]          // remainder, GUI
+        let top: Entry?
+        let latestTimeLabel: String?   // "9:45 PM"
+        let sessionCount: Int
+    }
+
     private let statusItem: NSStatusItem
     private let stateLabel: NSMenuItem
-    private let transcriptionLabel: NSMenuItem
     private let toggleItem: NSMenuItem
-
+    private let patchNowItem: NSMenuItem
     private let handoffItem: NSMenuItem
+    private let transcriptionLabel: NSMenuItem
 
     private var recordingDot: NSView?
+    private var isRecording = false
+    private var model = HandoffMenuModel(
+        mostUsed: [], terminal: [], app: [], top: nil, latestTimeLabel: nil, sessionCount: 0
+    )
 
     var onToggle: (() -> Void)?
     var onOpenFolder: (() -> Void)?
     var onOpenWindow: (() -> Void)?
     var onQuit: (() -> Void)?
-    /// Called with the agent name when the user picks one from "Hand off →".
     var onHandoff: ((String) -> Void)?
 
     init() {
@@ -33,7 +49,7 @@ final class MenuBarController {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
-        stateLabel = NSMenuItem(title: "idle", action: nil, keyEquivalent: "")
+        stateLabel = NSMenuItem(title: "● Idle", action: nil, keyEquivalent: "")
         stateLabel.isEnabled = false
         menu.addItem(stateLabel)
 
@@ -44,44 +60,33 @@ final class MenuBarController {
 
         menu.addItem(.separator())
 
-        toggleItem = NSMenuItem(
-            title: "Start recording",
-            action: #selector(toggleClicked),
-            keyEquivalent: "r"
-        )
+        toggleItem = NSMenuItem(title: "Start recording", action: #selector(toggleClicked), keyEquivalent: "r")
         menu.addItem(toggleItem)
 
-        // Hand off → [detected agents]. Rebuilt whenever a transcript lands,
-        // disabled until there's something to hand off.
-        handoffItem = NSMenuItem(title: "Hand off to", action: nil, keyEquivalent: "")
+        menu.addItem(.separator())
+
+        patchNowItem = NSMenuItem(title: "Patch through", action: #selector(patchNowClicked), keyEquivalent: "")
+        patchNowItem.isEnabled = false
+        menu.addItem(patchNowItem)
+
+        handoffItem = NSMenuItem(title: "Patch through to", action: nil, keyEquivalent: "")
         handoffItem.submenu = NSMenu()
         handoffItem.isEnabled = false
         menu.addItem(handoffItem)
 
-        let openWindow = NSMenuItem(
-            title: "Open Patchthrough…",
-            action: #selector(openWindowClicked),
-            keyEquivalent: "b"
-        )
-        menu.addItem(openWindow)
+        menu.addItem(.separator())
 
-        let openFolder = NSMenuItem(
-            title: "Open recordings folder",
-            action: #selector(openFolderClicked),
-            keyEquivalent: "o"
-        )
+        let openWindow = NSMenuItem(title: "Open Patchthrough…", action: #selector(openWindowClicked), keyEquivalent: "b")
+        menu.addItem(openWindow)
+        let openFolder = NSMenuItem(title: "Recordings folder", action: #selector(openFolderClicked), keyEquivalent: "o")
         menu.addItem(openFolder)
 
         menu.addItem(.separator())
 
-        let quit = NSMenuItem(
-            title: "Quit Patchthrough",
-            action: #selector(quitClicked),
-            keyEquivalent: "q"
-        )
+        let quit = NSMenuItem(title: "Quit", action: #selector(quitClicked), keyEquivalent: "q")
         menu.addItem(quit)
 
-        for item in [toggleItem, openWindow, openFolder, quit] {
+        for item in [toggleItem, patchNowItem, openWindow, openFolder, quit] {
             item.target = self
         }
 
@@ -93,73 +98,104 @@ final class MenuBarController {
             button.image = image
             button.imagePosition = .imageLeft
         }
+        render()
     }
 
-    /// Reflect recording state: the mark stays template (macOS handles
-    /// light/dark), and the Signal dot appears at the lower right, pulsing.
-    /// The elapsed counter lives in the menu's state label.
+    // MARK: - State
+
     func update(recording: Bool, elapsed: String?) {
-        stateLabel.title = recording ? "● recording · \(elapsed ?? "0:00")" : "idle"
-        toggleItem.title = recording ? "Stop recording" : "Start recording"
+        isRecording = recording
+        renderState(elapsed: elapsed)
         setRecordingDot(visible: recording)
+        renderPatchItems()
     }
 
-    /// Show transcription progress/failure as a second status line in the
-    /// menu; nil hides it. While transcribing, the mark goes heavy — the
-    /// design system's "patching" state.
     func updateTranscription(_ text: String?) {
         transcriptionLabel.title = text ?? ""
         transcriptionLabel.isHidden = text == nil
-
         let image = Self.markImage(weight: text == nil ? .regular : .heavy)
         image?.isTemplate = true
         statusItem.button?.image = image
     }
 
-    /// Populate "Hand off to →": terminal agents first, then GUI targets.
-    /// `representedObject` carries "cli:<name>" or "gui:<id>" so the handler
-    /// knows which door to use. Pass nil session when nothing is transcribed.
-    func updateHandoff(agents: [String], guiTargets: [(id: String, label: String)], latestSession: String?) {
+    func apply(_ newModel: HandoffMenuModel) {
+        model = newModel
+        render()
+    }
+
+    private func render() {
+        renderState(elapsed: nil)
+        renderPatchItems()
+    }
+
+    private func renderState(elapsed: String?) {
+        if isRecording {
+            // ● Recording  1:04 — Signal, monospaced digits.
+            let s = NSMutableAttributedString(
+                string: "● Recording",
+                attributes: [.foregroundColor: NSColor(
+                    calibratedRed: 0xD2/255, green: 0x37/255, blue: 0x1B/255, alpha: 1)]
+            )
+            if let elapsed {
+                s.append(NSAttributedString(
+                    string: "  \(elapsed)",
+                    attributes: [.font: NSFont.monospacedDigitSystemFont(
+                        ofSize: NSFont.systemFontSize(for: .small), weight: .regular)]
+                ))
+            }
+            stateLabel.attributedTitle = s
+            toggleItem.title = "Stop & transcribe"
+            toggleItem.subtitle = "mic + system audio · 2 tracks"
+        } else {
+            stateLabel.attributedTitle = nil
+            let n = model.sessionCount
+            stateLabel.title = "● Idle · \(n) session\(n == 1 ? "" : "s")"
+            toggleItem.title = "Start recording"
+            toggleItem.subtitle = nil
+        }
+    }
+
+    private func renderPatchItems() {
+        // Promoted one-click item: top-ranked destination, latest session.
+        if let top = model.top, let time = model.latestTimeLabel {
+            patchNowItem.title = "Patch \(time) to \(top.label)"
+            patchNowItem.image = NSImage(systemSymbolName: top.symbol, accessibilityDescription: nil)
+            patchNowItem.representedObject = top.id
+            patchNowItem.isEnabled = !isRecording   // nothing finished to patch while recording
+            patchNowItem.isHidden = false
+        } else {
+            patchNowItem.isHidden = true
+        }
+
         let sub = handoffItem.submenu ?? NSMenu()
         sub.removeAllItems()
+        let hasAny = !(model.mostUsed.isEmpty && model.terminal.isEmpty && model.app.isEmpty)
+        handoffItem.isEnabled = hasAny && model.latestTimeLabel != nil && !isRecording
 
-        guard let session = latestSession, !(agents.isEmpty && guiTargets.isEmpty) else {
-            handoffItem.isEnabled = false
-            handoffItem.title = latestSession != nil
-                ? "Hand off to (no agents found)"
-                : "Hand off to"
-            return
+        func add(_ entries: [HandoffMenuModel.Entry], header: String) {
+            guard !entries.isEmpty else { return }
+            sub.addItem(NSMenuItem.sectionHeader(title: header))
+            for e in entries {
+                // Never show a count of 0 — omit the suffix instead.
+                let title = e.count > 0 ? "\(e.label)   \(e.count)×" : e.label
+                let item = NSMenuItem(title: title, action: #selector(handoffClicked(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = e.id
+                item.image = NSImage(systemSymbolName: e.symbol, accessibilityDescription: nil)
+                item.isEnabled = !isRecording
+                sub.addItem(item)
+            }
         }
-
-        handoffItem.title = "Hand off \(session) to"
-        handoffItem.isEnabled = true
-
-        for name in agents {
-            let item = NSMenuItem(title: "\(name) — terminal", action: #selector(handoffClicked(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = "cli:\(name)"
-            item.image = NSImage(systemSymbolName: Handoff.symbol(for: name), accessibilityDescription: nil)
-            sub.addItem(item)
-        }
-        if !agents.isEmpty && !guiTargets.isEmpty { sub.addItem(.separator()) }
-        for target in guiTargets {
-            let item = NSMenuItem(title: target.label, action: #selector(handoffClicked(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = "gui:\(target.id)"
-            item.image = NSImage(systemSymbolName: Handoff.symbol(for: target.id), accessibilityDescription: nil)
-            sub.addItem(item)
-        }
+        add(model.mostUsed, header: "Most used")
+        add(model.terminal, header: "Terminal")
+        add(model.app, header: "App")
         handoffItem.submenu = sub
     }
 
-    // MARK: - The mark
+    // MARK: - The mark (unchanged by the redesign — logo handoff is authoritative)
 
     enum MarkWeight { case regular, heavy }
 
-    /// The Patchthrough mark: socket ring + patch cord, 24×24 grid, inlined
-    /// from packaging/design (single binary, no resource bundle). Rules that
-    /// matter: ring and cord always share one weight, the cord never crosses
-    /// the ring's centre, and nothing here gets rotated or mirrored.
     private static func markSVG(weight: CGFloat) -> String {
         """
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">\
@@ -174,11 +210,11 @@ final class MenuBarController {
     private static func markImage(weight: MarkWeight) -> NSImage? {
         let svg = markSVG(weight: weight == .regular ? 1.6 : 2.1)
         guard let data = svg.data(using: .utf8), let image = NSImage(data: data) else { return nil }
-        image.size = NSSize(width: 18, height: 18)   // spec: 18pt in the menu bar
+        image.size = NSSize(width: 18, height: 18)
         return image
     }
 
-    /// The Signal dot: 7px at 18pt, lower right, pulsing at 1.6s ease-in-out.
+    /// The Signal dot: 7px at 18pt, lower right, pulsing 1.6s ease-in-out.
     /// A subview rather than part of the image, so the mark stays a template.
     private func setRecordingDot(visible: Bool) {
         guard let button = statusItem.button else { return }
@@ -194,7 +230,7 @@ final class MenuBarController {
         dot.autoresizingMask = [.minXMargin, .maxYMargin]
         dot.wantsLayer = true
         dot.layer?.backgroundColor = NSColor(
-            calibratedRed: 0xD2 / 255, green: 0x37 / 255, blue: 0x1B / 255, alpha: 1
+            calibratedRed: 0xD2/255, green: 0x37/255, blue: 0x1B/255, alpha: 1
         ).cgColor
         dot.layer?.cornerRadius = 3.5
 
@@ -215,7 +251,10 @@ final class MenuBarController {
     @objc private func openWindowClicked() { onOpenWindow?() }
     @objc private func openFolderClicked() { onOpenFolder?() }
     @objc private func quitClicked() { onQuit?() }
+    @objc private func patchNowClicked() {
+        if let id = patchNowItem.representedObject as? String { onHandoff?(id) }
+    }
     @objc private func handoffClicked(_ sender: NSMenuItem) {
-        if let name = sender.representedObject as? String { onHandoff?(name) }
+        if let id = sender.representedObject as? String { onHandoff?(id) }
     }
 }

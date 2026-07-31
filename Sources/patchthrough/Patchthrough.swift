@@ -253,6 +253,7 @@ final class AppController {
     private var ticker: Timer?
     private let store: SessionStore
     private let windowController: PatchthroughWindowController
+    private var rootWatcher: DispatchSourceFileSystemObject?
 
     init(root: URL) {
         self.root = root
@@ -275,6 +276,27 @@ final class AppController {
             }
             await transcription.resumePending(root: root)
         }
+
+        watchRecordingsRoot()
+    }
+
+    /// The redesign removed the Refresh button: the list reloads itself when
+    /// the recordings folder changes (new session directories appearing or
+    /// vanishing). Transcript completion inside a session is already covered
+    /// by the transcription status handler.
+    private func watchRecordingsRoot() {
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let fd = open(root.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd, eventMask: [.write], queue: .main
+        )
+        source.setEventHandler { [weak self] in
+            self?.refreshHandoffMenu()
+        }
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        rootWatcher = source
     }
 
     /// Show the main window (session list + transcript + dispatch).
@@ -282,13 +304,27 @@ final class AppController {
         windowController.show()
     }
 
-    /// Rebuild "Hand off to →" from what's on disk and what's installed.
-    /// Cheap enough to call whenever state changes.
+    /// Rebuild the patch-through menu from the ranked destinations and
+    /// what's on disk. Cheap enough to call whenever state changes.
     private func refreshHandoffMenu() {
-        let agents = Handoff.installedAgents().map(\.agent.name)
-        let gui = Handoff.installedGuiTargets().map { (id: $0.id, label: $0.label) }
-        let latest = try? Handoff.resolveSession(named: nil, root: root)
-        menuBar.updateHandoff(agents: agents, guiTargets: gui, latestSession: latest?.name)
+        store.refresh()
+        let counts = DestinationRanking.counts()
+        let ranked = store.rankedDestinations
+        func entry(_ d: SessionStore.Destination) -> MenuBarController.HandoffMenuModel.Entry {
+            .init(id: d.id, label: d.shortLabel, symbol: d.symbol, count: counts[d.id] ?? 0)
+        }
+        let top3 = ranked.prefix(3)
+        let rest = ranked.dropFirst(3)
+        let latest = store.items.first { $0.status == .ready }
+        menuBar.apply(.init(
+            mostUsed: top3.map(entry),
+            terminal: rest.filter(\.isTerminal).map(entry),
+            app: rest.filter { !$0.isTerminal }.map(entry),
+            top: top3.first.map(entry),
+            latestTimeLabel: latest?.date.map { $0.formatted(date: .omitted, time: .shortened) }
+                ?? latest?.id,
+            sessionCount: store.items.count
+        ))
     }
 
     /// Menu-bar handoff. `choice` is "cli:<agent>" (Terminal session) or
@@ -325,10 +361,14 @@ final class AppController {
                     )
                 default: break
                 }
+                DestinationRanking.record(choice)
+                refreshHandoffMenu()
                 return
             }
             guard let repo = pickRepo(session: session.name, destination: target.label) else { return }
             Handoff.launchGui(target: target, session: session, repo: repo)
+            DestinationRanking.record(choice)
+            refreshHandoffMenu()
             return
         }
 
@@ -347,6 +387,8 @@ final class AppController {
             prompt: Handoff.prompt(for: session),
             cwd: repo
         )
+        DestinationRanking.record(choice)
+        refreshHandoffMenu()
     }
 
     private func pickRepo(session: String, destination: String) -> URL? {
