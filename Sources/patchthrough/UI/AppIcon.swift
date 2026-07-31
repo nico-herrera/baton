@@ -1,10 +1,10 @@
 import AppKit
 
-/// The Dock/⌘Tab icon, drawn in code. baton ships as a single binary with no
+/// The Dock/⌘Tab icon, drawn in code. patchthrough ships as a single binary with no
 /// .app bundle, so there's no Assets.car for the system to read — without
 /// this, promoting to .regular for the window shows the generic executable
 /// icon. `NSApp.applicationIconImage` accepts any NSImage at runtime, so the
-/// icon is vector-drawn here: the same baton-in-flight mark as the menu bar,
+/// icon is vector-drawn here: the same mark as the menu bar,
 /// on a macOS-style rounded square.
 enum AppIcon {
 

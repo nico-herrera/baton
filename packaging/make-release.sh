@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# Build, sign, and package baton for installing on another Mac.
-# Produces dist/baton-local-<sha>-arm64.tar.gz
+# Build, sign, and package patchthrough for installing on another Mac.
+# Produces dist/patchthrough-local-<sha>-arm64.tar.gz
 #
 #   ./packaging/make-release.sh
 #   ./packaging/make-release.sh --no-sign     skip codesigning
@@ -32,13 +32,13 @@ trap 'rm -rf "$STAGE"' EXIT
 
 say "building release binary…"
 swift build -c release 2>&1 | tail -3
-BIN=".build/release/baton"
+BIN=".build/release/patchthrough"
 [ -x "$BIN" ] || fail "build produced no binary"
 
-NAME="baton-local-$SHA-arm64"
+NAME="patchthrough-local-$SHA-arm64"
 PKG="$STAGE/$NAME"
 mkdir -p "$PKG"
-cp "$BIN" "$PKG/baton"
+cp "$BIN" "$PKG/patchthrough"
 cp packaging/install.sh "$PKG/install.sh"
 chmod 755 "$PKG/install.sh"
 
@@ -47,9 +47,9 @@ chmod 755 "$PKG/install.sh"
 if [ "$SIGN" -eq 1 ]; then
   say "signing…"
   codesign --force --sign "$IDENTITY" --timestamp \
-           --identifier com.nicoherrera.baton "$PKG/baton"
-  codesign --verify --strict "$PKG/baton" || fail "signature failed to verify"
-  codesign -dvv "$PKG/baton" 2>&1 | grep -E "^Authority=|^TeamIdentifier=" | sed 's/^/  /'
+           --identifier com.nicoherrera.patchthrough "$PKG/patchthrough"
+  codesign --verify --strict "$PKG/patchthrough" || fail "signature failed to verify"
+  codesign -dvv "$PKG/patchthrough" 2>&1 | grep -E "^Authority=|^TeamIdentifier=" | sed 's/^/  /'
 else
   say "skipping signing (--no-sign)"
 fi
@@ -58,12 +58,12 @@ fi
 
 BASE="$(git rev-parse --short origin/main 2>/dev/null || echo unknown)"
 cat > "$PKG/VERSION" <<EOF
-baton
+patchthrough
 
 built:            $(date -u '+%Y-%m-%d %H:%M:%SZ')
 branch:           $(git branch --show-current)
 commit:           $(git rev-parse HEAD)
-pushed base:      $BASE  (nico-herrera/baton main)
+pushed base:      $BASE  (nico-herrera/patchthrough main)
 local commits not yet pushed:
 $(git log --oneline --no-decorate origin/main..HEAD 2>/dev/null | sed 's/^/  /')
 
@@ -71,7 +71,7 @@ built on:         macOS $(sw_vers -productVersion), $(swift --version 2>&1 | hea
 target:           arm64, macOS 15+
 EOF
 
-( cd "$PKG" && shasum -a 256 baton install.sh > SHA256SUMS )
+( cd "$PKG" && shasum -a 256 patchthrough install.sh > SHA256SUMS )
 
 cp README.md "$PKG/README.md"
 

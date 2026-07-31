@@ -2,13 +2,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "baton",
+    name: "patchthrough",
     platforms: [.macOS(.v15)],
     dependencies: [
         // Exact pins, not ranges. Two reasons:
         //
         // Correctness: `from: "0.7.0"` had silently resolved to 0.15.5, and
-        // pre-1.0 minor bumps are breaking by convention — baton calls
+        // pre-1.0 minor bumps are breaking by convention — patchthrough calls
         // FluidAudio's `buildWordTimings` free function directly.
         //
         // Supply chain: a range means a future `swift package update` — or any
@@ -22,7 +22,7 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "baton",
+            name: "patchthrough",
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "FluidAudio", package: "FluidAudio"),
@@ -30,13 +30,13 @@ let package = Package(
             exclude: ["Info.plist"],
             linkerSettings: [
                 // Embed Info.plist into the binary so TCC can attribute the
-                // system-audio-capture permission to baton itself when it
+                // system-audio-capture permission to patchthrough itself when it
                 // runs as a LaunchAgent (no .app bundle to carry a plist).
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",
                     "-Xlinker", "__TEXT",
                     "-Xlinker", "__info_plist",
-                    "-Xlinker", "Sources/baton/Info.plist",
+                    "-Xlinker", "Sources/patchthrough/Info.plist",
                 ]),
             ]
         ),

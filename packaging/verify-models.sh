@@ -53,7 +53,7 @@ if [ "${1:-}" = "--update" ]; then
   read -r answer
   [ "$answer" = "REVIEWED" ] || fail "aborted — baseline unchanged"
   {
-    echo "# Reviewed model baseline for baton."
+    echo "# Reviewed model baseline for patchthrough."
     echo "# Regenerate with: ./packaging/verify-models.sh --update"
     echo "# Baselined $(date -u '+%Y-%m-%d %H:%M:%SZ') — $COUNT files, $SIZE"
     echo "# Source: FluidAudio downloads these from HuggingFace at runtime."

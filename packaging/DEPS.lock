@@ -1,4 +1,4 @@
-# Reviewed dependency baseline for baton.
+# Reviewed dependency baseline for patchthrough.
 # Regenerate with: ./packaging/verify-deps.sh --update
 # Format: identity revision version location
 # Baselined 2026-07-31 01:21:32Z by nicoherrera

@@ -255,7 +255,7 @@ enum Handoff {
 
     /// With `"auto_paste": true` in the config, finish the clipboard handoff
     /// ourselves: give the app a beat to open, then synthesize ⌘N (new chat)
-    /// and ⌘V (paste). Needs Accessibility for baton; without it the
+    /// and ⌘V (paste). Needs Accessibility for patchthrough; without it the
     /// osascript fails and we fall back to telling the user to paste.
     static func autoPasteIfEnabled(app: String) {
         guard Config.autoPaste() else { return }
@@ -276,7 +276,7 @@ enum Handoff {
         osa.waitUntilExit()
         if osa.terminationStatus != 0 {
             FileHandle.standardError.write(Data(
-                "auto_paste failed — grant Accessibility to baton in System Settings → Privacy & Security\n".utf8
+                "auto_paste failed — grant Accessibility to patchthrough in System Settings → Privacy & Security\n".utf8
             ))
         }
     }
@@ -338,7 +338,7 @@ enum Handoff {
             case .emptyTranscript(let name):
                 return "session '\(name)' has a transcript file but no segments — both tracks likely failed; check its transcribe.log"
             case .unknownAgent(let name, let available):
-                return "'\(name)' isn't installed or isn't an agent baton knows. Found here: \(available.isEmpty ? "none" : available.joined(separator: ", "))"
+                return "'\(name)' isn't installed or isn't an agent patchthrough knows. Found here: \(available.isEmpty ? "none" : available.joined(separator: ", "))"
             }
         }
     }
@@ -451,7 +451,7 @@ enum Handoff {
             let exclude = URL(fileURLWithPath: gitDir).appendingPathComponent("info/exclude")
             let existing = (try? String(contentsOf: exclude, encoding: .utf8)) ?? ""
             if !existing.components(separatedBy: "\n").contains(".meeting/") {
-                let addition = "\n# baton meeting transcripts — local only, never commit\n.meeting/\n"
+                let addition = "\n# patchthrough meeting transcripts — local only, never commit\n.meeting/\n"
                 try? (existing + addition).write(to: exclude, atomically: true, encoding: .utf8)
             }
         }
@@ -479,7 +479,7 @@ enum Handoff {
 
     // MARK: - Launching (CLI path: replace this process with the agent)
 
-    /// Launch the agent in the current terminal, replacing the baton process
+    /// Launch the agent in the current terminal, replacing the patchthrough process
     /// so the agent owns the TTY. Only returns on failure.
     static func exec(agent: Agent, at path: String, prompt: String, cwd: URL) -> Never {
         FileManager.default.changeCurrentDirectoryPath(cwd.path)
@@ -519,7 +519,7 @@ enum Handoff {
         // The prompt goes through a temp file → environment, never through
         // shell interpolation: transcript-derived text must not reach a shell.
         let stagedPrompt = FileManager.default.temporaryDirectory
-            .appendingPathComponent("baton-prompt-\(UUID().uuidString).txt")
+            .appendingPathComponent("patchthrough-prompt-\(UUID().uuidString).txt")
         try? prompt.write(to: stagedPrompt, atomically: true, encoding: .utf8)
 
         let launcher: String

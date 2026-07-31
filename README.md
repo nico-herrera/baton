@@ -1,8 +1,8 @@
-# baton
+# patchthrough
 
-Record the meeting. Pass the baton to your agent.
+Record the meeting. We'll patch you through to your agent.
 
-baton is a macOS menu-bar app that records your meetings (your mic and the
+patchthrough is a macOS menu-bar app that records your meetings (your mic and the
 other side of the call as two separate tracks), transcribes them **entirely
 on-device**, and then hands the transcript to whatever coding agent you use —
 Claude Code, Copilot, Codex, Kimi, opencode, cursor-agent — as a primed
@@ -22,7 +22,7 @@ handoff is the product: the gap between *"we agreed on it in the meeting"* and
 
 ## How it works
 
-1. **Click the baton in the menu bar → Start recording.** Your mic and
+1. **Click the patchthrough in the menu bar → Start recording.** Your mic and
    everything the Mac plays are captured as two separate CAF tracks. Two
    tracks on purpose: speech models do better on clean single-source audio,
    and mic-vs-system gives you two-party diarization — `me` vs `them` — with
@@ -35,7 +35,7 @@ handoff is the product: the gap between *"we agreed on it in the meeting"* and
    running and the transcript staged. Or from a terminal, in the repo:
 
    ```sh
-   baton hand claude
+   patchthrough hand claude
    ```
 
 The agent gets the verbatim transcript — deliberately not a summary, because a
@@ -43,41 +43,41 @@ lossy summary is exactly where requirements get quietly dropped — plus a promp
 that tells it to extract work items, decisions, and ambiguities, ask before
 guessing at garbled terms, and not touch any code until you've agreed the plan.
 
-The transcript lands in `.meeting/` inside your repo, which baton adds to the
+The transcript lands in `.meeting/` inside your repo, which patchthrough adds to the
 repo's **local** git excludes — meeting content can't end up in a commit by
 accident, and your `.gitignore` isn't touched.
 
 ## Install
 
 ```sh
-git clone https://github.com/nico-herrera/baton
-cd baton
+git clone https://github.com/nico-herrera/patchthrough
+cd patchthrough
 swift build -c release
-sudo cp .build/release/baton /usr/local/bin/baton
-baton install --launch-at-login   # optional: run in the background from login
+sudo cp .build/release/patchthrough /usr/local/bin/patchthrough
+patchthrough install --launch-at-login   # optional: run in the background from login
 ```
 
 **Requires:** macOS 15+ (system-audio capture uses Core Audio process taps),
 Apple Silicon (transcription runs on the Neural Engine). Models (~600 MB)
 download once on first transcription — record a short test while online before
-your first real meeting. `baton doctor` tells you if they're cached.
+your first real meeting. `patchthrough doctor` tells you if they're cached.
 
 ## CLI
 
 ```sh
-baton                        # run the menu-bar daemon (^C to quit)
-baton hand [agent]           # hand the newest transcript to an agent, here
-baton hand claude -s <session> -d <repo> -n
-baton transcripts            # list sessions: length, status, first line
-baton doctor                 # check permissions, folder, models
-baton install --launch-at-login | --uninstall
+patchthrough                        # run the menu-bar daemon (^C to quit)
+patchthrough hand [agent]           # hand the newest transcript to an agent, here
+patchthrough hand claude -s <session> -d <repo> -n
+patchthrough transcripts            # list sessions: length, status, first line
+patchthrough doctor                 # check permissions, folder, models
+patchthrough install --launch-at-login | --uninstall
 ```
 
 Sessions land in `~/Recordings/<yyyy.MM.dd-HHmm>/`: the two audio tracks,
 `meta.json`, `transcript.json` (timed, speaker-tagged segments), and
 `transcript.md`.
 
-Optional config at `~/.config/baton/config.json`:
+Optional config at `~/.config/patchthrough/config.json`:
 
 ```json
 {
@@ -95,12 +95,12 @@ Optional config at `~/.config/baton/config.json`:
 
 Two kinds of destination, both auto-detected:
 
-**Terminal sessions** — baton looks for agent CLIs in the usual install
+**Terminal sessions** — patchthrough looks for agent CLIs in the usual install
 locations: `claude`, `copilot`, `codex`, `kimi`, `opencode`, `cursor-agent`.
 Most launch as `<agent> "<prompt>"`; opencode uses `opencode run`; kimi takes
-no initial prompt, so baton stages it on your clipboard.
+no initial prompt, so patchthrough stages it on your clipboard.
 
-**GUIs** (`baton hand <target> --gui`, or straight from the menu bar) — each
+**GUIs** (`patchthrough hand <target> --gui`, or straight from the menu bar) — each
 app gets the best door it actually exposes:
 
 | target | how the handoff lands |
@@ -114,16 +114,16 @@ app gets the best door it actually exposes:
 
 Where an app exposes no prompt API, the clipboard payload is deliberately
 self-contained — instructions first, verbatim transcript below. Add
-`"auto_paste": true` to the config and baton finishes the job itself,
+`"auto_paste": true` to the config and patchthrough finishes the job itself,
 synthesizing ⌘N + ⌘V after the app opens (one-time Accessibility grant; you
 still press send).
 
-And the universal door: the baton window (menu bar → Open baton) shows every
+And the universal door: the patchthrough window (menu bar → Open patchthrough) shows every
 session with a **drag chip** — drag the transcript file into any chat input
-anywhere, including apps baton has no button for.
+anywhere, including apps patchthrough has no button for.
 
 Adding an agent or GUI target is a one-line entry in
-`Sources/baton/Handoff.swift`.
+`Sources/patchthrough/Handoff.swift`.
 
 ## Trust
 
@@ -150,14 +150,14 @@ supply-chain posture is deliberate:
 - A global tap records **everything** the Mac plays — notification dings,
   music, all of it. Don't play anything you don't want transcribed.
 - Silent recordings usually mean System Settings → Privacy & Security →
-  Screen & System Audio Recording is off for baton.
+  Screen & System Audio Recording is off for patchthrough.
 - Parakeet is English-only.
 - Expect ASR errors on proper nouns and identifiers; the handoff prompt warns
   the agent about exactly this.
 
 ## Credits
 
-baton began as a detached rebuild of [quill](https://github.com/digimata/quill)
+patchthrough began as a detached rebuild of [quill](https://github.com/digimata/quill)
 by digimata — the recording and transcription core descends from it (MIT, see
 LICENSE). Transcription is [Parakeet TDT](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2)
 via [FluidAudio](https://github.com/FluidInference/FluidAudio)'s Core ML port.

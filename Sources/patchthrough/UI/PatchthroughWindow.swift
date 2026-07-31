@@ -193,7 +193,7 @@ final class SessionStore: ObservableObject {
 
 // MARK: - Views
 
-struct BatonRootView: View {
+struct PatchthroughRootView: View {
     @ObservedObject var store: SessionStore
 
     var body: some View {
@@ -279,7 +279,7 @@ struct BatonRootView: View {
 
     /// The universal handoff: a draggable chip. Every chat app accepts a file
     /// dropped on its input — Claude, ChatGPT, Kimi, Cursor's chat pane — so
-    /// drag works even for apps baton has no button for.
+    /// drag works even for apps patchthrough has no button for.
     private func dragHeader(_ item: SessionStore.Item) -> some View {
         HStack(spacing: 10) {
             Text(item.id).font(.system(.body, design: .monospaced))
@@ -383,7 +383,7 @@ struct BatonRootView: View {
 // MARK: - Window plumbing
 
 @MainActor
-final class BatonWindowController: NSObject, NSWindowDelegate {
+final class PatchthroughWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let store: SessionStore
 
@@ -400,10 +400,10 @@ final class BatonWindowController: NSObject, NSWindowDelegate {
                 backing: .buffered,
                 defer: false
             )
-            w.title = "baton"
+            w.title = "patchthrough"
             w.isReleasedWhenClosed = false
             w.delegate = self
-            w.contentView = NSHostingView(rootView: BatonRootView(store: store))
+            w.contentView = NSHostingView(rootView: PatchthroughRootView(store: store))
             // Open on whichever screen has the pointer — with several displays,
             // centering on the "main" screen puts the window somewhere the user
             // isn't looking.
@@ -430,7 +430,7 @@ final class BatonWindowController: NSObject, NSWindowDelegate {
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
 
-        if ProcessInfo.processInfo.environment["BATON_DEBUG_WINDOW"] != nil, let w = window {
+        if ProcessInfo.processInfo.environment["PATCHTHROUGH_DEBUG_WINDOW"] != nil, let w = window {
             FileHandle.standardError.write(Data("""
             window: visible=\(w.isVisible) key=\(w.isKeyWindow) \
             frame=\(Int(w.frame.origin.x)),\(Int(w.frame.origin.y)) \

@@ -3,16 +3,16 @@ import ArgumentParser
 import Foundation
 
 @main
-struct Baton: ParsableCommand {
+struct Patchthrough: ParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "baton",
+        commandName: "patchthrough",
         abstract: "Record a meeting, transcribe it on-device, hand the transcript to your coding agent.",
         subcommands: [Run.self, Hand.self, Transcripts.self, Doctor.self, Install.self],
         defaultSubcommand: Run.self
     )
 }
 
-/// `baton hand [agent]` — stage the newest (or a chosen) transcript in the
+/// `patchthrough hand [agent]` — stage the newest (or a chosen) transcript in the
 /// current repo and start an agent session primed with it.
 struct Hand: ParsableCommand {
     static let configuration = CommandConfiguration(
@@ -23,10 +23,10 @@ struct Hand: ParsableCommand {
         the repo's local git excludes) and launches the agent with a prompt
         pointing at it. With no agent named, lists what's installed.
 
-          baton hand claude              newest transcript → claude, here
-          baton hand kimi -s 2026.07.30-2145
-          baton hand claude -d ~/Developer/foo
-          baton hand claude -n           stage + print prompt, don't launch
+          patchthrough hand claude              newest transcript → claude, here
+          patchthrough hand kimi -s 2026.07.30-2145
+          patchthrough hand claude -d ~/Developer/foo
+          patchthrough hand claude -n           stage + print prompt, don't launch
         """
     )
 
@@ -58,7 +58,7 @@ struct Hand: ParsableCommand {
             for (a, path) in installed { print("  \(a.name)  →  \(path)") }
             print("\nGUI targets (use --gui):")
             for t in guiTargets { print("  \(t.id)  →  \(t.label)") }
-            print("\nusage: baton hand <agent> [--gui]   (from inside the repo you want to work in)")
+            print("\nusage: patchthrough hand <agent> [--gui]   (from inside the repo you want to work in)")
             return
         }
 
@@ -105,7 +105,7 @@ struct Hand: ParsableCommand {
     }
 }
 
-/// `baton transcripts` — what's on disk, newest first.
+/// `patchthrough transcripts` — what's on disk, newest first.
 struct Transcripts: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "transcripts",
@@ -156,7 +156,7 @@ struct Run: ParsableCommand {
     @Option(name: .long, help: "Recordings root directory (overrides the config file).")
     var out: String?
 
-    @Flag(name: .long, help: "Open the baton window at launch.")
+    @Flag(name: .long, help: "Open the patchthrough window at launch.")
     var window = false
 
     func run() throws {
@@ -213,7 +213,7 @@ struct Run: ParsableCommand {
         }
 
         FileHandle.standardError.write(Data(
-            "baton up · recordings → \(root.path) · ^C to quit\n".utf8
+            "patchthrough up · recordings → \(root.path) · ^C to quit\n".utf8
         ))
 
         // The sources MUST outlive the run loop. A plain local (or a trailing
@@ -252,12 +252,12 @@ final class AppController {
     private var session: RecordingSession?
     private var ticker: Timer?
     private let store: SessionStore
-    private let windowController: BatonWindowController
+    private let windowController: PatchthroughWindowController
 
     init(root: URL) {
         self.root = root
         store = SessionStore(root: root)
-        windowController = BatonWindowController(store: store)
+        windowController = PatchthroughWindowController(store: store)
         store.onToggleRecording = { [weak self] in self?.toggle() }
         menuBar.onToggle = { [weak self] in self?.toggle() }
         menuBar.onOpenFolder = { [weak self] in self?.openFolder() }
@@ -308,19 +308,19 @@ final class AppController {
                 switch target.kind {
                 case .appClipboard(let appName):
                     notifyUser(
-                        title: "baton — handed to \(appName)",
+                        title: "patchthrough — handed to \(appName)",
                         body: Config.autoPaste()
                             ? "Pasting into a new chat…"
                             : "Prompt + transcript are on your clipboard. Paste (⌘V) into a new chat."
                     )
                 case .fileOpen(let appName):
                     notifyUser(
-                        title: "baton — handed to \(appName)",
+                        title: "patchthrough — handed to \(appName)",
                         body: "Transcript attached. Instructions are on your clipboard — paste (⌘V) and send."
                     )
                 case .folderOpen(let appName):
                     notifyUser(
-                        title: "baton — session folder → \(appName)",
+                        title: "patchthrough — session folder → \(appName)",
                         body: "Instructions are on your clipboard — paste (⌘V) once the workspace opens."
                     )
                 default: break
@@ -339,7 +339,7 @@ final class AppController {
         do {
             try Handoff.stage(session: session, inRepo: repo)
         } catch {
-            notifyUser(title: "baton — handoff failed", body: "\(error)")
+            notifyUser(title: "patchthrough — handoff failed", body: "\(error)")
             return
         }
         Handoff.launchInTerminal(
@@ -387,7 +387,7 @@ final class AppController {
             FileHandle.standardError.write(Data("● recording → \(newSession.dir.path)\n".utf8))
         } catch {
             FileHandle.standardError.write(Data("recording start failed: \(error)\n".utf8))
-            notifyUser(title: "baton — recording failed", body: "\(error)")
+            notifyUser(title: "patchthrough — recording failed", body: "\(error)")
             return
         }
 

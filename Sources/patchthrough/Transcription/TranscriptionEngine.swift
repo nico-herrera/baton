@@ -8,9 +8,9 @@ struct TranscriptSegment: Sendable {
     let text: String
 }
 
-/// A speech-to-text engine baton can run locally. Engines are prepared lazily
+/// A speech-to-text engine patchthrough can run locally. Engines are prepared lazily
 /// (model download + load) when the transcription queue has work and released
-/// when it drains, so baton never idles holding gigabytes of model weights.
+/// when it drains, so patchthrough never idles holding gigabytes of model weights.
 protocol TranscriptionEngine: Sendable {
     /// Short engine identifier recorded as transcript.json provenance.
     var name: String { get }

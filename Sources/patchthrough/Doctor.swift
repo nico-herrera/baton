@@ -39,7 +39,7 @@ enum DoctorReport {
             return Check(
                 name: "microphone",
                 status: .fail("denied"),
-                remediation: "System Settings → Privacy & Security → Microphone → enable for baton (or your terminal)"
+                remediation: "System Settings → Privacy & Security → Microphone → enable for patchthrough (or your terminal)"
             )
         @unknown default:
             return Check(name: "microphone", status: .fail("unknown state"), remediation: nil)

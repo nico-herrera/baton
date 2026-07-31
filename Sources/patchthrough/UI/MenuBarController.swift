@@ -51,7 +51,7 @@ final class MenuBarController {
         menu.addItem(handoffItem)
 
         let openWindow = NSMenuItem(
-            title: "Open baton…",
+            title: "Open patchthrough…",
             action: #selector(openWindowClicked),
             keyEquivalent: "b"
         )
@@ -67,7 +67,7 @@ final class MenuBarController {
         menu.addItem(.separator())
 
         let quit = NSMenuItem(
-            title: "Quit baton",
+            title: "Quit patchthrough",
             action: #selector(quitClicked),
             keyEquivalent: "q"
         )
@@ -80,7 +80,7 @@ final class MenuBarController {
         statusItem.menu = menu
 
         if let button = statusItem.button {
-            let image = Self.batonImage()
+            let image = Self.markImage()
             image?.isTemplate = true
             button.image = image
             button.imagePosition = .imageLeft
@@ -139,10 +139,11 @@ final class MenuBarController {
         handoffItem.submenu = sub
     }
 
-    // A relay baton in flight — diagonal bar with motion ticks behind it.
+    // The patch cable in flight — diagonal line with signal ticks. Same mark
+    // scaled up for the Dock icon in AppIcon.swift.
     // Inlined SVG so the executable has no separate resource bundle to
     // install alongside it — true single-binary.
-    private static let batonSVG = """
+    private static let markSVG = """
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" \
     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" \
     stroke-linecap="round" stroke-linejoin="round">\
@@ -153,8 +154,8 @@ final class MenuBarController {
     </svg>
     """
 
-    private static func batonImage() -> NSImage? {
-        guard let data = batonSVG.data(using: .utf8),
+    private static func markImage() -> NSImage? {
+        guard let data = markSVG.data(using: .utf8),
               let image = NSImage(data: data)
         else { return nil }
         // Menu-bar status icons are nominally 18pt tall; size the SVG to match.

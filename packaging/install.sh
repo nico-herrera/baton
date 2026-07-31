@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# baton installer (patched local build).
+# patchthrough installer (patched local build).
 # Run from inside the unpacked tarball directory:  ./install.sh
 #
 #   --prefix DIR   install somewhere other than /usr/local/bin
@@ -11,7 +11,7 @@
 set -euo pipefail
 
 PREFIX="/usr/local/bin"
-AGENT="com.nicoherrera.baton"
+AGENT="com.nicoherrera.patchthrough"
 PLIST="$HOME/Library/LaunchAgents/$AGENT.plist"
 WANT_AGENT=1
 UNINSTALL=0
@@ -38,7 +38,7 @@ if [ "$UNINSTALL" -eq 1 ]; then
   say "uninstalling…"
   launchctl bootout "gui/$(id -u)/$AGENT" 2>/dev/null || true
   rm -f "$PLIST"
-  if [ -w "$PREFIX" ]; then rm -f "$PREFIX/baton"; else sudo rm -f "$PREFIX/baton"; fi
+  if [ -w "$PREFIX" ]; then rm -f "$PREFIX/patchthrough"; else sudo rm -f "$PREFIX/patchthrough"; fi
   say "removed. Your recordings in ~/Recordings were left alone."
   say "To also revoke permissions: System Settings → Privacy & Security →"
   say "Microphone / Screen & System Audio Recording."
@@ -55,18 +55,18 @@ Parakeet transcription runs on the Neural Engine — Intel Macs can't run it."
 
 OS_MAJOR="$(sw_vers -productVersion | cut -d. -f1)"
 if [ "$OS_MAJOR" -lt 15 ]; then
-  fail "baton needs macOS 15 or newer (you're on $(sw_vers -productVersion)).
+  fail "patchthrough needs macOS 15 or newer (you're on $(sw_vers -productVersion)).
 System audio capture uses Core Audio process taps, which don't exist before 15."
 fi
 echo "  ✓ $(sw_vers -productVersion) on $ARCH"
 
-[ -f "$SRC_DIR/baton" ] || fail "no 'baton' binary next to this script — unpack the full tarball first"
+[ -f "$SRC_DIR/patchthrough" ] || fail "no 'patchthrough' binary next to this script — unpack the full tarball first"
 
 # Verify the signature before trusting the binary.
-if codesign --verify --strict "$SRC_DIR/baton" 2>/dev/null; then
+if codesign --verify --strict "$SRC_DIR/patchthrough" 2>/dev/null; then
   # No early `exit` in awk: it would close the pipe while codesign is still
   # writing, and SIGPIPE + `set -o pipefail` kills the whole script.
-  SIGNER="$(codesign -dvv "$SRC_DIR/baton" 2>&1 \
+  SIGNER="$(codesign -dvv "$SRC_DIR/patchthrough" 2>&1 \
             | awk -F= '/^Authority=/ && !seen { print $2; seen = 1 }')"
   echo "  ✓ signature valid — $SIGNER"
 else
@@ -80,8 +80,8 @@ fi
 if [ -f "$SRC_DIR/SHA256SUMS" ]; then
   if ( cd "$SRC_DIR" && shasum -a 256 -c SHA256SUMS >/dev/null 2>&1 ); then
     echo "  ✓ checksum matches"
-  elif [ "${BATON_SKIP_CHECKSUM:-}" = "1" ]; then
-    warn "  ! checksum MISMATCH — overridden by BATON_SKIP_CHECKSUM=1"
+  elif [ "${PATCHTHROUGH_SKIP_CHECKSUM:-}" = "1" ]; then
+    warn "  ! checksum MISMATCH — overridden by PATCHTHROUGH_SKIP_CHECKSUM=1"
   else
     ( cd "$SRC_DIR" && shasum -a 256 -c SHA256SUMS 2>&1 | grep -v ': OK$' | sed 's/^/    /' ) || true
     fail "checksum MISMATCH — refusing to install.
@@ -90,10 +90,10 @@ The files here don't match the checksums the tarball shipped with. Either the
 download is corrupt or the contents were modified after packaging.
 
 Re-download from the release you built, and compare the outer tarball hash too:
-  shasum -a 256 baton-local-*.tar.gz
+  shasum -a 256 patchthrough-local-*.tar.gz
 
 If you changed a file yourself on purpose, either regenerate SHA256SUMS or
-re-run with BATON_SKIP_CHECKSUM=1."
+re-run with PATCHTHROUGH_SKIP_CHECKSUM=1."
   fi
 fi
 
@@ -102,25 +102,25 @@ fi
 # Anything downloaded carries com.apple.quarantine, and this build is signed
 # but not notarized, so Gatekeeper blocks it on first run. Strip the flag.
 # You don't have to take that on faith — the signature check above is real,
-# and you can re-run it yourself: codesign -dvv ./baton
-if xattr -p com.apple.quarantine "$SRC_DIR/baton" >/dev/null 2>&1; then
+# and you can re-run it yourself: codesign -dvv ./patchthrough
+if xattr -p com.apple.quarantine "$SRC_DIR/patchthrough" >/dev/null 2>&1; then
   say "removing the download quarantine flag…"
-  xattr -d com.apple.quarantine "$SRC_DIR/baton" 2>/dev/null || true
+  xattr -d com.apple.quarantine "$SRC_DIR/patchthrough" 2>/dev/null || true
 fi
 
 # --- install ---------------------------------------------------------------
 
 echo
-say "installing to $PREFIX/baton…"
+say "installing to $PREFIX/patchthrough…"
 mkdir -p "$PREFIX" 2>/dev/null || sudo mkdir -p "$PREFIX"
 
 if [ -w "$PREFIX" ]; then
-  cp "$SRC_DIR/baton" "$PREFIX/baton"
-  chmod 755 "$PREFIX/baton"
+  cp "$SRC_DIR/patchthrough" "$PREFIX/patchthrough"
+  chmod 755 "$PREFIX/patchthrough"
 else
   say "  (needs your password)"
-  sudo cp "$SRC_DIR/baton" "$PREFIX/baton"
-  sudo chmod 755 "$PREFIX/baton"
+  sudo cp "$SRC_DIR/patchthrough" "$PREFIX/patchthrough"
+  sudo chmod 755 "$PREFIX/patchthrough"
 fi
 
 case ":$PATH:" in
@@ -134,17 +134,17 @@ esac
 if [ "$WANT_AGENT" -eq 1 ]; then
   echo
   say "registering launch-at-login…"
-  "$PREFIX/baton" install --launch-at-login
+  "$PREFIX/patchthrough" install --launch-at-login
 else
   echo
-  say "skipping launch-at-login (--no-agent). Start it by running: baton"
+  say "skipping launch-at-login (--no-agent). Start it by running: patchthrough"
 fi
 
 # --- report ----------------------------------------------------------------
 
 echo
 say "checking permissions…"
-"$PREFIX/baton" doctor || true
+"$PREFIX/patchthrough" doctor || true
 
 cat <<'EOF'
 
@@ -152,7 +152,7 @@ cat <<'EOF'
 Installed. Click the feather in your menu bar → Start recording.
 
 First recording prompts for Microphone and Screen & System Audio
-Recording. Grant both — system audio is how baton hears the other side
+Recording. Grant both — system audio is how patchthrough hears the other side
 of a call. Sessions land in ~/Recordings/<timestamp>/.
 
 Two things to know:

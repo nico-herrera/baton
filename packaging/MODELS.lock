@@ -1,4 +1,4 @@
-# Reviewed model baseline for baton.
+# Reviewed model baseline for patchthrough.
 # Regenerate with: ./packaging/verify-models.sh --update
 # Baselined 2026-07-31 01:23:10Z — 22 files, 451M
 # Source: FluidAudio downloads these from HuggingFace at runtime.

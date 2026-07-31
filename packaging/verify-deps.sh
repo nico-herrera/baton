@@ -50,7 +50,7 @@ if [ "${1:-}" = "--update" ]; then
   read -r answer
   [ "$answer" = "REVIEWED" ] || fail "aborted — baseline unchanged"
   {
-    echo "# Reviewed dependency baseline for baton."
+    echo "# Reviewed dependency baseline for patchthrough."
     echo "# Regenerate with: ./packaging/verify-deps.sh --update"
     echo "# Format: identity revision version location"
     echo "# Baselined $(date -u '+%Y-%m-%d %H:%M:%SZ') by $(whoami)"

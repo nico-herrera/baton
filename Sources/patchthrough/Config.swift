@@ -1,6 +1,6 @@
 import Foundation
 
-/// Optional user config at ~/.config/baton/config.json:
+/// Optional user config at ~/.config/patchthrough/config.json:
 ///
 ///     {
 ///       "recordings_dir": "~/Recordings",
@@ -15,7 +15,7 @@ import Foundation
 /// after recording when transcription is disabled.
 enum Config {
     static let path = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".config/baton/config.json")
+        .appendingPathComponent(".config/patchthrough/config.json")
 
     static let defaultRoot = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Recordings", isDirectory: true)
