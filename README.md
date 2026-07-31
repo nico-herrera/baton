@@ -93,11 +93,28 @@ Optional config at `~/.config/baton/config.json`:
 
 ## Agents
 
-baton looks for agent CLIs in the usual install locations and shows what it
-finds. Currently: `claude`, `copilot`, `codex`, `kimi`, `opencode`,
-`cursor-agent`. Most launch as `<agent> "<prompt>"`; opencode uses
-`opencode run`; kimi takes no initial prompt, so baton stages it on your
-clipboard. Adding an agent is a one-line entry in
+Two kinds of destination, both auto-detected:
+
+**Terminal sessions** — baton looks for agent CLIs in the usual install
+locations: `claude`, `copilot`, `codex`, `kimi`, `opencode`, `cursor-agent`.
+Most launch as `<agent> "<prompt>"`; opencode uses `opencode run`; kimi takes
+no initial prompt, so baton stages it on your clipboard.
+
+**GUIs** (`baton hand <target> --gui`, or straight from the menu bar) — each
+app gets the best door it actually exposes:
+
+| target | how the handoff lands |
+|---|---|
+| `copilot` | VS Code opens via `code chat` — agent mode, transcript attached as context |
+| `cursor` | Cursor opens the repo, prompt arrives via its `cursor://` deeplink (clipboard fallback) |
+| `claude` | Claude app opens; prompt + full transcript on the clipboard, one paste |
+| `codex` | ChatGPT app opens; same clipboard payload |
+| `kimi` | Kimi app opens; same clipboard payload |
+
+The chat apps expose no prompt API, so the clipboard payload is deliberately
+self-contained — instructions first, verbatim transcript below.
+
+Adding an agent or GUI target is a one-line entry in
 `Sources/baton/Handoff.swift`.
 
 ## Trust

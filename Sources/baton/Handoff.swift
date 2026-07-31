@@ -61,6 +61,139 @@ enum Handoff {
         }
     }
 
+    // MARK: - GUI targets
+
+    /// A GUI destination for the handoff. Different apps expose very different
+    /// doors: VS Code has a real `code chat` CLI that attaches files; Cursor
+    /// has a prompt deeplink; the chat apps (Claude, ChatGPT, Kimi) expose no
+    /// prompt API at all, so they get a self-contained prompt+transcript on
+    /// the clipboard and a single paste finishes the handoff.
+    struct GuiTarget {
+        let id: String        // stable identifier for CLI/menu
+        let label: String     // human-readable menu title
+        let kind: Kind
+
+        enum Kind {
+            case vscodeChat                      // code chat -n -a <file> "<prompt>"
+            case cursorDeeplink                  // open repo, prompt via cursor:// deeplink + clipboard
+            case appClipboard(appName: String)   // open -a <App>, everything on the clipboard
+        }
+    }
+
+    static let knownGuiTargets: [GuiTarget] = [
+        GuiTarget(id: "copilot", label: "Copilot — VS Code", kind: .vscodeChat),
+        GuiTarget(id: "cursor", label: "Cursor", kind: .cursorDeeplink),
+        GuiTarget(id: "claude", label: "Claude app", kind: .appClipboard(appName: "Claude")),
+        GuiTarget(id: "codex", label: "Codex — ChatGPT app", kind: .appClipboard(appName: "ChatGPT")),
+        GuiTarget(id: "kimi", label: "Kimi app", kind: .appClipboard(appName: "Kimi")),
+    ]
+
+    /// VS Code's CLI, wherever it lives (PATH, or bundled inside the app).
+    static func vscodeCLI() -> String? {
+        if let onPath = find("code") { return onPath }
+        let bundled = "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+        return FileManager.default.isExecutableFile(atPath: bundled) ? bundled : nil
+    }
+
+    static func cursorCLI() -> String? {
+        if let onPath = find("cursor") { return onPath }
+        let bundled = "/Applications/Cursor.app/Contents/Resources/app/bin/cursor"
+        return FileManager.default.isExecutableFile(atPath: bundled) ? bundled : nil
+    }
+
+    private static func appInstalled(_ name: String) -> Bool {
+        FileManager.default.fileExists(atPath: "/Applications/\(name).app")
+    }
+
+    /// GUI targets actually available on this machine.
+    static func installedGuiTargets() -> [GuiTarget] {
+        knownGuiTargets.filter { target in
+            switch target.kind {
+            case .vscodeChat: return vscodeCLI() != nil
+            case .cursorDeeplink: return cursorCLI() != nil || appInstalled("Cursor")
+            case .appClipboard(let app): return appInstalled(app)
+            }
+        }
+    }
+
+    /// Open the handoff in a GUI. For vscode/cursor the transcript is staged
+    /// in `repo`; for the chat apps the transcript rides along inline so no
+    /// file access is needed.
+    static func launchGui(target: GuiTarget, session: Session, repo: URL?) {
+        switch target.kind {
+        case .vscodeChat:
+            guard let code = vscodeCLI(), let repo else { return }
+            let staged = try? stage(session: session, inRepo: repo)
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: code)
+            var args = ["chat", "--new-window", "--mode", "agent"]
+            if let staged { args += ["--add-file", staged.path] }
+            args.append(prompt(for: session))
+            p.arguments = args
+            p.currentDirectoryURL = repo
+            try? p.run()
+
+        case .cursorDeeplink:
+            guard let repo else { return }
+            _ = try? stage(session: session, inRepo: repo)
+            if let cursor = cursorCLI() {
+                let openRepo = Process()
+                openRepo.executableURL = URL(fileURLWithPath: cursor)
+                openRepo.arguments = [repo.path]
+                try? openRepo.run()
+                openRepo.waitUntilExit()
+            }
+            // Cursor's documented prompt deeplink. Belt and braces: the same
+            // prompt goes on the clipboard in case the deeplink is ignored.
+            let text = prompt(for: session)
+            pbcopy(text)
+            if let encoded = text.addingPercentEncoding(withAllowedCharacters: .alphanumerics) {
+                let open = Process()
+                open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                open.arguments = ["cursor://anysphere.cursor-deeplink/prompt?text=\(encoded)"]
+                try? open.run()
+            }
+
+        case .appClipboard(let appName):
+            // No prompt API — everything self-contained on the clipboard:
+            // instructions first, verbatim transcript below. One paste.
+            let payload = appPrompt(for: session) + "\n\n---\n\n" + handoffDocument(for: session)
+            pbcopy(payload)
+            let open = Process()
+            open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            open.arguments = ["-a", appName]
+            try? open.run()
+        }
+    }
+
+    /// Prompt variant for chat apps, where the transcript is pasted inline
+    /// rather than staged as a repo file.
+    static func appPrompt(for session: Session) -> String {
+        """
+        Below is the transcript of a meeting I just had (\(session.duration), \
+        machine-transcribed). Work out what it asks of me, then give me:
+
+        1. Concrete work items it implies, ordered by what should happen first.
+        2. Anything stated as a decision or constraint I shouldn't relitigate.
+        3. Anything ambiguous, contradictory, or that reads like a transcription error — ask rather than guess.
+
+        It's speech-to-text, so it's messy: unreliable punctuation, garbled \
+        technical terms, 'me'/'them' instead of names. Read for intent, not \
+        literal wording.
+        """
+    }
+
+    static func pbcopy(_ text: String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pbcopy")
+        let pipe = Pipe()
+        p.standardInput = pipe
+        try? p.run()
+        pipe.fileHandleForWriting.write(Data(text.utf8))
+        try? pipe.fileHandleForWriting.close()
+        p.waitUntilExit()
+    }
+
     // MARK: - Sessions
 
     struct Session {

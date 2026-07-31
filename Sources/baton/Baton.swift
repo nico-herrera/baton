@@ -42,17 +42,23 @@ struct Hand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Stage the file and print the prompt without launching.")
     var noLaunch = false
 
+    @Flag(name: .shortAndLong, help: "Open the GUI instead of a terminal session (VS Code chat for copilot, Cursor, or the Claude/ChatGPT/Kimi app).")
+    var gui = false
+
     func run() throws {
         let root = Config.resolveRoot(cliOverride: nil)
         let installed = Handoff.installedAgents()
+        let guiTargets = Handoff.installedGuiTargets()
 
         guard let agentName = agent else {
-            print("agents installed here:")
+            print("terminal agents installed here:")
             if installed.isEmpty {
                 print("  (none found — looked in \(Handoff.searchDirs.joined(separator: ", ")))")
             }
             for (a, path) in installed { print("  \(a.name)  →  \(path)") }
-            print("\nusage: baton hand <agent>   (from inside the repo you want to work in)")
+            print("\nGUI targets (use --gui):")
+            for t in guiTargets { print("  \(t.id)  →  \(t.label)") }
+            print("\nusage: baton hand <agent> [--gui]   (from inside the repo you want to work in)")
             return
         }
 
@@ -64,6 +70,23 @@ struct Hand: ParsableCommand {
         }
 
         let repo = URL(fileURLWithPath: dir ?? FileManager.default.currentDirectoryPath)
+
+        if gui {
+            guard let target = guiTargets.first(where: { $0.id == agentName }) else {
+                throw Handoff.HandoffError.unknownAgent(
+                    "\(agentName) (gui)", available: guiTargets.map(\.id)
+                )
+            }
+            if noLaunch {
+                _ = try Handoff.stage(session: sess, inRepo: repo)
+                print("staged; would open \(target.label)")
+                return
+            }
+            Handoff.launchGui(target: target, session: sess, repo: repo)
+            FileHandle.standardError.write(Data("→ \(target.label)\n".utf8))
+            return
+        }
+
         let staged = try Handoff.stage(session: sess, inRepo: repo)
         FileHandle.standardError.write(Data(
             "staged \(staged.path)  (\(sess.words) words, \(sess.segments) segments, \(sess.duration))\n".utf8
@@ -241,29 +264,39 @@ final class AppController {
     /// Cheap enough to call whenever state changes.
     private func refreshHandoffMenu() {
         let agents = Handoff.installedAgents().map(\.agent.name)
+        let gui = Handoff.installedGuiTargets().map { (id: $0.id, label: $0.label) }
         let latest = try? Handoff.resolveSession(named: nil, root: root)
-        menuBar.updateHandoff(agents: agents, latestSession: latest?.name)
+        menuBar.updateHandoff(agents: agents, guiTargets: gui, latestSession: latest?.name)
     }
 
-    /// Menu-bar handoff: pick the project folder, then open Terminal there
-    /// running the agent primed with the newest transcript.
-    private func handOff(to agentName: String) {
-        guard let match = Handoff.installedAgents().first(where: { $0.agent.name == agentName }),
-              let session = try? Handoff.resolveSession(named: nil, root: root)
+    /// Menu-bar handoff. `choice` is "cli:<agent>" (Terminal session) or
+    /// "gui:<target>" (VS Code chat, Cursor, or a chat app). Repo-based
+    /// targets get a folder picker first; chat apps don't need one — the
+    /// transcript rides along on the clipboard.
+    private func handOff(to choice: String) {
+        guard let session = try? Handoff.resolveSession(named: nil, root: root) else { return }
+
+        let isGui = choice.hasPrefix("gui:")
+        let name = String(choice.dropFirst(4))
+
+        if isGui {
+            guard let target = Handoff.installedGuiTargets().first(where: { $0.id == name }) else { return }
+            if case .appClipboard(let appName) = target.kind {
+                Handoff.launchGui(target: target, session: session, repo: nil)
+                notifyUser(
+                    title: "baton — handed to \(appName)",
+                    body: "Prompt + transcript are on your clipboard. Paste (⌘V) into a new chat."
+                )
+                return
+            }
+            guard let repo = pickRepo(session: session.name, destination: target.label) else { return }
+            Handoff.launchGui(target: target, session: session, repo: repo)
+            return
+        }
+
+        guard let match = Handoff.installedAgents().first(where: { $0.agent.name == name }),
+              let repo = pickRepo(session: session.name, destination: name)
         else { return }
-
-        let panel = NSOpenPanel()
-        panel.title = "Hand \(session.name) to \(agentName)"
-        panel.message = "Choose the project this meeting was about — the agent session starts there."
-        panel.prompt = "Start session"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Developer", isDirectory: true)
-
-        NSApp.activate(ignoringOtherApps: true)
-        guard panel.runModal() == .OK, let repo = panel.url else { return }
 
         do {
             try Handoff.stage(session: session, inRepo: repo)
@@ -276,6 +309,22 @@ final class AppController {
             prompt: Handoff.prompt(for: session),
             cwd: repo
         )
+    }
+
+    private func pickRepo(session: String, destination: String) -> URL? {
+        let panel = NSOpenPanel()
+        panel.title = "Hand \(session) to \(destination)"
+        panel.message = "Choose the project this meeting was about — the session starts there."
+        panel.prompt = "Start session"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Developer", isDirectory: true)
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let repo = panel.url else { return nil }
+        return repo
     }
 
     /// Stop any live session cleanly (finalizing files) and exit.

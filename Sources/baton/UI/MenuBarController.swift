@@ -97,15 +97,16 @@ final class MenuBarController {
         transcriptionLabel.isHidden = text == nil
     }
 
-    /// Populate "Hand off to →" with the agents found on this machine and the
-    /// session it would hand off. Pass nil when nothing is transcribed yet.
-    func updateHandoff(agents: [String], latestSession: String?) {
+    /// Populate "Hand off to →": terminal agents first, then GUI targets.
+    /// `representedObject` carries "cli:<name>" or "gui:<id>" so the handler
+    /// knows which door to use. Pass nil session when nothing is transcribed.
+    func updateHandoff(agents: [String], guiTargets: [(id: String, label: String)], latestSession: String?) {
         let sub = handoffItem.submenu ?? NSMenu()
         sub.removeAllItems()
 
-        guard let session = latestSession, !agents.isEmpty else {
+        guard let session = latestSession, !(agents.isEmpty && guiTargets.isEmpty) else {
             handoffItem.isEnabled = false
-            handoffItem.title = agents.isEmpty && latestSession != nil
+            handoffItem.title = latestSession != nil
                 ? "Hand off to (no agents found)"
                 : "Hand off to"
             return
@@ -113,10 +114,18 @@ final class MenuBarController {
 
         handoffItem.title = "Hand off \(session) to"
         handoffItem.isEnabled = true
+
         for name in agents {
-            let item = NSMenuItem(title: name, action: #selector(handoffClicked(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: "\(name) — terminal", action: #selector(handoffClicked(_:)), keyEquivalent: "")
             item.target = self
-            item.representedObject = name
+            item.representedObject = "cli:\(name)"
+            sub.addItem(item)
+        }
+        if !agents.isEmpty && !guiTargets.isEmpty { sub.addItem(.separator()) }
+        for target in guiTargets {
+            let item = NSMenuItem(title: target.label, action: #selector(handoffClicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = "gui:\(target.id)"
             sub.addItem(item)
         }
         handoffItem.submenu = sub
