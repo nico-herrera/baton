@@ -198,9 +198,18 @@ final class SessionStore: ObservableObject {
     }
 
     static func groupedTurns(_ segments: [Segment]) -> [Turn] {
+        func seconds(_ t: String) -> Int {
+            var total = 0
+            for part in t.split(separator: ":") { total = total * 60 + (Int(part) ?? 0) }
+            return total
+        }
         var turns: [Turn] = []
+        var lastStart = Int.min
         for seg in segments {
-            if let last = turns.last, last.speaker == seg.speaker {
+            let start = seconds(seg.time)
+            // Same turn only for the same speaker with no long silence —
+            // the mock starts a fresh THEM block after a 9s gap.
+            if let last = turns.last, last.speaker == seg.speaker, start - lastStart < 8 {
                 turns[turns.count - 1] = Turn(
                     id: last.id, speaker: last.speaker, time: last.time,
                     lines: last.lines + [seg.text]
@@ -208,6 +217,7 @@ final class SessionStore: ObservableObject {
             } else {
                 turns.append(Turn(id: seg.id, speaker: seg.speaker, time: seg.time, lines: [seg.text]))
             }
+            lastStart = start
         }
         return turns
     }
@@ -397,22 +407,71 @@ struct PatchthroughRootView: View {
     // MARK: Sidebar — time + first transcript line.
 
     private var sessionList: some View {
-        List(selection: $store.selection) {
+        List {
             ForEach(store.groupedItems, id: \.title) { group in
-                Section(group.title) {
+                Section {
                     ForEach(group.items) { item in
                         sidebarRow(item)
+                            .contentShape(Rectangle())
+                            .onTapGesture { store.selection = item.id }
+                            .listRowBackground(rowBackground(selected: store.selection == item.id))
                     }
+                } header: {
+                    Text(group.title)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .tracking(0.8)
+                        .textCase(.uppercase)
+                        .foregroundStyle(Color.ptText4)
                 }
             }
         }
         .listStyle(.sidebar)
-        .tint(.ptSignal)
         .scrollContentBackground(.hidden)
         .background(Color.ptSidebar)
+        .safeAreaInset(edge: .bottom, spacing: 0) { sidebarFooter }
         .overlay {
             if store.visibleItems.isEmpty { emptySidebar }
         }
+    }
+
+    /// Mock: background rgba(210,55,27,0.15), border 1px rgba(210,55,27,0.32),
+    /// radius 7 — the "filled row with a faint ring".
+    private func rowBackground(selected: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 7)
+            .fill(selected ? Color.ptSignal.opacity(0.15) : .clear)
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .strokeBorder(selected ? Color.ptSignal.opacity(0.32) : .clear, lineWidth: 1)
+            )
+            .padding(.horizontal, 6)
+    }
+
+    /// Mock: the sidebar ends in the recordings path, hairline above.
+    private var sidebarFooter: some View {
+        Button {
+            NSWorkspace.shared.open(store.root)
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "folder")
+                    .font(.system(size: 10.5))
+                Text(displayPath(store.root))
+                    .font(.system(size: 11, design: .monospaced))
+                Spacer()
+            }
+            .foregroundStyle(Color.ptText4)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+        .buttonStyle(.plain)
+        .background(Color.ptSidebar)
+        .overlay(alignment: .top) { Rectangle().fill(Color.ptHairline).frame(height: 1) }
+        .help("Open the recordings folder")
+    }
+
+    private func displayPath(_ url: URL) -> String {
+        url.path.replacingOccurrences(
+            of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"
+        )
     }
 
     @ViewBuilder
@@ -431,7 +490,6 @@ struct PatchthroughRootView: View {
                     .truncationMode(.tail)
             }
             .padding(.vertical, 3)
-            .tag(item.id)
         } else {
             // Pending/broken keep their status glyph and subtitle.
             HStack(spacing: 8) {
@@ -444,7 +502,6 @@ struct PatchthroughRootView: View {
                 }
             }
             .padding(.vertical, 3)
-            .tag(item.id)
         }
     }
 
@@ -534,8 +591,6 @@ struct PatchthroughRootView: View {
                     .foregroundStyle(Color.ptText3)
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 9).padding(.vertical, 4)
-            .background(Color.ptRaised, in: RoundedRectangle(cornerRadius: 6))
             .help(store.repoPath.isEmpty ? "Choose the project repo-based handoffs start in" : store.repoPath)
         }
         .padding(.horizontal, 14)
