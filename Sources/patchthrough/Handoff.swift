@@ -15,6 +15,11 @@ enum Handoff {
         let name: String
         let launch: LaunchStyle
 
+        /// SF Symbol for the UI. Chosen to say something about the target
+        /// rather than decorate it: a moon for Kimi (Moonshot), braces for
+        /// opencode, a cursor for Cursor.
+        var symbol: String { Handoff.symbol(for: name) }
+
         enum LaunchStyle {
             case positionalPrompt          // claude, codex, cursor-agent, copilot
             case runSubcommand             // opencode run "<prompt>"
@@ -103,6 +108,22 @@ enum Handoff {
         GuiTarget(id: "codex", label: "Codex — ChatGPT app", kind: .appClipboard(appName: "ChatGPT")),
         GuiTarget(id: "kimi", label: "Kimi app", kind: .appClipboard(appName: "Kimi")),
     ]
+
+    /// SF Symbols per destination. Keyed by id so terminal agents and GUI
+    /// targets stay visually consistent — `claude` looks like `claude`
+    /// whichever door it goes through.
+    static func symbol(for id: String) -> String {
+        switch id {
+        case "claude":        return "sparkle"
+        case "claude-cowork": return "folder.badge.gearshape"
+        case "copilot":       return "chevron.left.forwardslash.chevron.right"
+        case "codex":         return "bubble.left.and.text.bubble.right"
+        case "cursor", "cursor-agent": return "cursorarrow.rays"
+        case "kimi":          return "moon.stars"       // Moonshot AI
+        case "opencode":      return "curlybraces"
+        default:              return "terminal"
+        }
+    }
 
     /// VS Code's CLI, wherever it lives (PATH, or bundled inside the app).
     static func vscodeCLI() -> String? {

@@ -65,6 +65,49 @@ enum Config {
         load()?["auto_paste"] as? Bool ?? false
     }
 
+    /// Whether transcription runs at all.
+    static func transcriptionEnabledValue() -> Bool {
+        transcription()?["enabled"] as? Bool ?? true
+    }
+
+    // MARK: - Writing
+
+    /// Merge a set of values into the config file, creating it if needed.
+    /// Keys mapped to nil are removed, so the file only ever contains
+    /// deliberate overrides rather than a full dump of defaults.
+    ///
+    /// Written atomically: a half-written config would be read as malformed
+    /// on next launch and silently drop every setting.
+    static func update(_ changes: [String: Any?]) throws {
+        var root = load() ?? [:]
+
+        for (key, value) in changes {
+            // Dotted keys address nested objects ("transcription.enabled").
+            let parts = key.split(separator: ".").map(String.init)
+            if parts.count == 2 {
+                var nested = root[parts[0]] as? [String: Any] ?? [:]
+                if let value { nested[parts[1]] = value } else { nested.removeValue(forKey: parts[1]) }
+                root[parts[0]] = nested.isEmpty ? nil : nested
+            } else if let value {
+                root[key] = value
+            } else {
+                root.removeValue(forKey: key)
+            }
+        }
+        root = root.compactMapValues { $0 }
+
+        try FileManager.default.createDirectory(
+            at: path.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        let data = try JSONSerialization.data(
+            withJSONObject: root, options: [.prettyPrinted, .sortedKeys]
+        )
+        try data.write(to: path, options: .atomic)
+    }
+
+    /// Where the config lives, for showing in the UI.
+    static var configPath: URL { path }
+
     /// Parse the config file. A malformed config is reported on stderr rather
     /// than silently ignored — recordings landing in an unexpected place is
     /// worse than a warning.
