@@ -14,6 +14,7 @@ final class MenuBarController {
 
     var onToggle: (() -> Void)?
     var onOpenFolder: (() -> Void)?
+    var onOpenWindow: (() -> Void)?
     var onQuit: (() -> Void)?
     /// Called with the agent name when the user picks one from "Hand off →".
     var onHandoff: ((String) -> Void)?
@@ -49,6 +50,13 @@ final class MenuBarController {
         handoffItem.isEnabled = false
         menu.addItem(handoffItem)
 
+        let openWindow = NSMenuItem(
+            title: "Open baton…",
+            action: #selector(openWindowClicked),
+            keyEquivalent: "b"
+        )
+        menu.addItem(openWindow)
+
         let openFolder = NSMenuItem(
             title: "Open recordings folder",
             action: #selector(openFolderClicked),
@@ -65,7 +73,7 @@ final class MenuBarController {
         )
         menu.addItem(quit)
 
-        for item in [toggleItem, openFolder, quit] {
+        for item in [toggleItem, openWindow, openFolder, quit] {
             item.target = self
         }
 
@@ -155,6 +163,7 @@ final class MenuBarController {
     }
 
     @objc private func toggleClicked() { onToggle?() }
+    @objc private func openWindowClicked() { onOpenWindow?() }
     @objc private func openFolderClicked() { onOpenFolder?() }
     @objc private func quitClicked() { onQuit?() }
     @objc private func handoffClicked(_ sender: NSMenuItem) {

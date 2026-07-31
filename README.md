@@ -107,12 +107,20 @@ app gets the best door it actually exposes:
 |---|---|
 | `copilot` | VS Code opens via `code chat` — agent mode, transcript attached as context |
 | `cursor` | Cursor opens the repo, prompt arrives via its `cursor://` deeplink (clipboard fallback) |
-| `claude` | Claude app opens; prompt + full transcript on the clipboard, one paste |
-| `codex` | ChatGPT app opens; same clipboard payload |
+| `claude` | Claude app opens **with the transcript file attached** (it accepts any file as a document); instructions on the clipboard |
+| `claude-cowork` | Claude opens the **whole session folder** as a workspace — audio, timing, transcript, all of it |
+| `codex` | ChatGPT app opens; prompt + full transcript on the clipboard, one paste |
 | `kimi` | Kimi app opens; same clipboard payload |
 
-The chat apps expose no prompt API, so the clipboard payload is deliberately
-self-contained — instructions first, verbatim transcript below.
+Where an app exposes no prompt API, the clipboard payload is deliberately
+self-contained — instructions first, verbatim transcript below. Add
+`"auto_paste": true` to the config and baton finishes the job itself,
+synthesizing ⌘N + ⌘V after the app opens (one-time Accessibility grant; you
+still press send).
+
+And the universal door: the baton window (menu bar → Open baton) shows every
+session with a **drag chip** — drag the transcript file into any chat input
+anywhere, including apps baton has no button for.
 
 Adding an agent or GUI target is a one-line entry in
 `Sources/baton/Handoff.swift`.

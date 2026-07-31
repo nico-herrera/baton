@@ -77,13 +77,29 @@ enum Handoff {
             case vscodeChat                      // code chat -n -a <file> "<prompt>"
             case cursorDeeplink                  // open repo, prompt via cursor:// deeplink + clipboard
             case appClipboard(appName: String)   // open -a <App>, everything on the clipboard
+            case fileOpen(appName: String)       // open -a <App> <transcript.md> — the file attaches
+            case folderOpen(appName: String)     // open -a <App> <session dir> — Cowork-style workspace
+        }
+
+        /// Whether launching this target needs a project folder.
+        var needsRepo: Bool {
+            switch kind {
+            case .vscodeChat, .cursorDeeplink: return true
+            case .appClipboard, .fileOpen, .folderOpen: return false
+            }
         }
     }
 
     static let knownGuiTargets: [GuiTarget] = [
         GuiTarget(id: "copilot", label: "Copilot — VS Code", kind: .vscodeChat),
         GuiTarget(id: "cursor", label: "Cursor", kind: .cursorDeeplink),
-        GuiTarget(id: "claude", label: "Claude app", kind: .appClipboard(appName: "Claude")),
+        // Claude.app declares public.data as an accepted document type, so an
+        // `open -a Claude <file>` genuinely attaches the transcript — no
+        // clipboard blob. It also takes public.folder with an Editor role,
+        // which is the Cowork folder-mount path: hand it the whole session
+        // directory and the agent can read the audio, meta and transcript.
+        GuiTarget(id: "claude", label: "Claude app — attach transcript", kind: .fileOpen(appName: "Claude")),
+        GuiTarget(id: "claude-cowork", label: "Claude Cowork — session folder", kind: .folderOpen(appName: "Claude")),
         GuiTarget(id: "codex", label: "Codex — ChatGPT app", kind: .appClipboard(appName: "ChatGPT")),
         GuiTarget(id: "kimi", label: "Kimi app", kind: .appClipboard(appName: "Kimi")),
     ]
@@ -111,7 +127,8 @@ enum Handoff {
             switch target.kind {
             case .vscodeChat: return vscodeCLI() != nil
             case .cursorDeeplink: return cursorCLI() != nil || appInstalled("Cursor")
-            case .appClipboard(let app): return appInstalled(app)
+            case .appClipboard(let app), .fileOpen(let app), .folderOpen(let app):
+                return appInstalled(app)
             }
         }
     }
@@ -163,6 +180,104 @@ enum Handoff {
             open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
             open.arguments = ["-a", appName]
             try? open.run()
+            open.waitUntilExit()
+            autoPasteIfEnabled(app: appName)
+
+        case .fileOpen(let appName):
+            // The app accepts arbitrary files (public.data), so hand it the
+            // transcript as an actual attachment. Instructions go on the
+            // clipboard — attach + ⌘V + send.
+            let doc = exportHandoffFile(for: session)
+            pbcopy(attachPrompt(for: session))
+            let open = Process()
+            open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            open.arguments = ["-a", appName, doc.path]
+            try? open.run()
+
+        case .folderOpen(let appName):
+            // The app takes folders with an Editor role (Cowork-style
+            // workspace): hand it the whole session directory — audio,
+            // meta.json, transcript — and the agent works with the originals.
+            _ = exportHandoffFile(for: session)   // ensure handoff.md is in the folder too
+            pbcopy(folderPrompt(for: session))
+            let open = Process()
+            open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            open.arguments = ["-a", appName, session.dir.path]
+            try? open.run()
+        }
+    }
+
+    /// Prompt for the file-attach path — the transcript arrives as an
+    /// attachment, not inline.
+    static func attachPrompt(for session: Session) -> String {
+        """
+        The attached file is the transcript of a meeting I just had \
+        (\(session.duration), machine-transcribed on-device). Read it, work \
+        out what it asks of me, then give me:
+
+        1. Concrete work items it implies, ordered by what should happen first.
+        2. Anything stated as a decision or constraint I shouldn't relitigate.
+        3. Anything ambiguous, contradictory, or that reads like a transcription error — ask rather than guess.
+
+        It's speech-to-text, so it's messy: unreliable punctuation, garbled \
+        technical terms, 'me' and 'them' instead of names. Read for intent, \
+        not literal wording.
+        """
+    }
+
+    /// Prompt for the folder-workspace path — the whole session directory is
+    /// the workspace.
+    static func folderPrompt(for session: Session) -> String {
+        """
+        This folder is a recorded meeting session (\(session.duration)). \
+        handoff.md and transcript.md hold the machine transcript ('me' = my \
+        mic, 'them' = the other side); meta.json has the timing; the .caf \
+        files are the raw audio. Read the transcript, work out what the \
+        meeting asks of me, then give me:
+
+        1. Concrete work items it implies, ordered by what should happen first.
+        2. Anything stated as a decision or constraint I shouldn't relitigate.
+        3. Anything ambiguous, contradictory, or that reads like a transcription error — ask rather than guess.
+
+        It's speech-to-text, so read for intent, not literal wording.
+        """
+    }
+
+    /// Write the self-describing handoff document next to the session's other
+    /// files. Stable location, survives reboots, and is what gets dragged or
+    /// attached. Idempotent.
+    @discardableResult
+    static func exportHandoffFile(for session: Session) -> URL {
+        let out = session.dir.appendingPathComponent("handoff.md")
+        try? handoffDocument(for: session).write(to: out, atomically: true, encoding: .utf8)
+        return out
+    }
+
+    /// With `"auto_paste": true` in the config, finish the clipboard handoff
+    /// ourselves: give the app a beat to open, then synthesize ⌘N (new chat)
+    /// and ⌘V (paste). Needs Accessibility for baton; without it the
+    /// osascript fails and we fall back to telling the user to paste.
+    static func autoPasteIfEnabled(app: String) {
+        guard Config.autoPaste() else { return }
+        let script = """
+        delay 1.2
+        tell application "\(app)" to activate
+        delay 0.4
+        tell application "System Events"
+            keystroke "n" using command down
+            delay 0.5
+            keystroke "v" using command down
+        end tell
+        """
+        let osa = Process()
+        osa.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        osa.arguments = ["-e", script]
+        try? osa.run()
+        osa.waitUntilExit()
+        if osa.terminationStatus != 0 {
+            FileHandle.standardError.write(Data(
+                "auto_paste failed — grant Accessibility to baton in System Settings → Privacy & Security\n".utf8
+            ))
         }
     }
 

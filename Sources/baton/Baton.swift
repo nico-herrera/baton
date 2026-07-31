@@ -156,6 +156,9 @@ struct Run: ParsableCommand {
     @Option(name: .long, help: "Recordings root directory (overrides the config file).")
     var out: String?
 
+    @Flag(name: .long, help: "Open the baton window at launch.")
+    var window = false
+
     func run() throws {
         // ArgumentParser invokes run() on the main thread; promote that fact
         // to the type system so AppKit calls are cleanly isolated.
@@ -183,6 +186,11 @@ struct Run: ParsableCommand {
         app.setActivationPolicy(.accessory)
 
         let controller = AppController(root: root)
+        if window {
+            // Defer until the run loop is pumping — ordering a window front
+            // before app.run() silently no-ops for accessory apps.
+            DispatchQueue.main.async { controller.openWindow() }
+        }
 
         // Ignore the default disposition *before* arming the sources, so there
         // is no window where an early signal kills us outright.
@@ -240,11 +248,17 @@ final class AppController {
     private let transcription = TranscriptionCoordinator()
     private var session: RecordingSession?
     private var ticker: Timer?
+    private let store: SessionStore
+    private let windowController: BatonWindowController
 
     init(root: URL) {
         self.root = root
+        store = SessionStore(root: root)
+        windowController = BatonWindowController(store: store)
+        store.onToggleRecording = { [weak self] in self?.toggle() }
         menuBar.onToggle = { [weak self] in self?.toggle() }
         menuBar.onOpenFolder = { [weak self] in self?.openFolder() }
+        menuBar.onOpenWindow = { [weak self] in self?.openWindow() }
         menuBar.onQuit = { [weak self] in self?.shutdown() }
         menuBar.onHandoff = { [weak self] agent in self?.handOff(to: agent) }
         menuBar.update(recording: false, elapsed: nil)
@@ -258,6 +272,11 @@ final class AppController {
             }
             await transcription.resumePending(root: root)
         }
+    }
+
+    /// Show the main window (session list + transcript + dispatch).
+    func openWindow() {
+        windowController.show()
     }
 
     /// Rebuild "Hand off to →" from what's on disk and what's installed.
@@ -281,12 +300,28 @@ final class AppController {
 
         if isGui {
             guard let target = Handoff.installedGuiTargets().first(where: { $0.id == name }) else { return }
-            if case .appClipboard(let appName) = target.kind {
+            if !target.needsRepo {
                 Handoff.launchGui(target: target, session: session, repo: nil)
-                notifyUser(
-                    title: "baton — handed to \(appName)",
-                    body: "Prompt + transcript are on your clipboard. Paste (⌘V) into a new chat."
-                )
+                switch target.kind {
+                case .appClipboard(let appName):
+                    notifyUser(
+                        title: "baton — handed to \(appName)",
+                        body: Config.autoPaste()
+                            ? "Pasting into a new chat…"
+                            : "Prompt + transcript are on your clipboard. Paste (⌘V) into a new chat."
+                    )
+                case .fileOpen(let appName):
+                    notifyUser(
+                        title: "baton — handed to \(appName)",
+                        body: "Transcript attached. Instructions are on your clipboard — paste (⌘V) and send."
+                    )
+                case .folderOpen(let appName):
+                    notifyUser(
+                        title: "baton — session folder → \(appName)",
+                        body: "Instructions are on your clipboard — paste (⌘V) once the workspace opens."
+                    )
+                default: break
+                }
                 return
             }
             guard let repo = pickRepo(session: session.name, destination: target.label) else { return }
@@ -354,6 +389,8 @@ final class AppController {
         }
 
         menuBar.update(recording: true, elapsed: "0:00")
+        store.isRecording = true
+        store.elapsed = "0:00"
         ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -370,6 +407,8 @@ final class AppController {
         ticker?.invalidate()
         ticker = nil
         menuBar.update(recording: false, elapsed: nil)
+        store.isRecording = false
+        store.refresh()
 
         let dir = session.dir
         Task { [transcription] in await transcription.enqueue(dir) }
@@ -381,6 +420,7 @@ final class AppController {
             menuBar.updateTranscription(nil)
             // A drain just finished — new transcript(s) may exist.
             refreshHandoffMenu()
+            store.refresh()
         case .transcribing(let name, let queued):
             menuBar.updateTranscription(
                 queued > 0 ? "transcribing \(name) · \(queued) queued" : "transcribing \(name)"
@@ -392,10 +432,9 @@ final class AppController {
 
     private func tick() {
         guard let session else { return }
-        menuBar.update(
-            recording: true,
-            elapsed: Self.format(Date().timeIntervalSince(session.startedAt))
-        )
+        let elapsed = Self.format(Date().timeIntervalSince(session.startedAt))
+        menuBar.update(recording: true, elapsed: elapsed)
+        store.elapsed = elapsed
     }
 
     private func openFolder() {

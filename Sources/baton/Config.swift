@@ -57,6 +57,14 @@ enum Config {
         load()?["mic_voice_processing"] as? Bool ?? false
     }
 
+    /// After a clipboard handoff to a chat app, synthesize ⌘N+⌘V so the paste
+    /// happens without a hand touching the keyboard. Off by default: it
+    /// requires an Accessibility grant and injects keystrokes, which is the
+    /// kind of thing that should be a deliberate opt-in.
+    static func autoPaste() -> Bool {
+        load()?["auto_paste"] as? Bool ?? false
+    }
+
     /// Parse the config file. A malformed config is reported on stderr rather
     /// than silently ignored — recordings landing in an unexpected place is
     /// worse than a warning.
