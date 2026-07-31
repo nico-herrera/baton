@@ -184,6 +184,9 @@ struct Run: ParsableCommand {
 
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
+        // Runtime Dock icon — a bare binary has no bundle for the system to
+        // read one from, and the window promotes us to .regular.
+        AppIcon.apply()
 
         let controller = AppController(root: root)
         if window {
