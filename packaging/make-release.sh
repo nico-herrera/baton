@@ -56,16 +56,16 @@ fi
 
 # --- provenance ------------------------------------------------------------
 
-UPSTREAM="$(git rev-parse --short origin/master 2>/dev/null || echo unknown)"
+BASE="$(git rev-parse --short origin/main 2>/dev/null || echo unknown)"
 cat > "$PKG/VERSION" <<EOF
-baton (patched local build)
+baton
 
 built:            $(date -u '+%Y-%m-%d %H:%M:%SZ')
 branch:           $(git branch --show-current)
 commit:           $(git rev-parse HEAD)
-upstream base:    $UPSTREAM  (digimata/baton master)
-local commits on top of upstream:
-$(git log --oneline --no-decorate origin/master..HEAD 2>/dev/null | sed 's/^/  /')
+pushed base:      $BASE  (nico-herrera/baton main)
+local commits not yet pushed:
+$(git log --oneline --no-decorate origin/main..HEAD 2>/dev/null | sed 's/^/  /')
 
 built on:         macOS $(sw_vers -productVersion), $(swift --version 2>&1 | head -1)
 target:           arm64, macOS 15+
