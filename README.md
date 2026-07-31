@@ -52,10 +52,14 @@ accident, and your `.gitignore` isn't touched.
 ```sh
 git clone https://github.com/nico-herrera/patchthrough
 cd patchthrough
-swift build -c release
-sudo cp .build/release/patchthrough /usr/local/bin/patchthrough
+./packaging/make-app.sh                  # builds, signs, installs to ~/Applications
 patchthrough install --launch-at-login   # optional: run in the background from login
 ```
+
+No `sudo`, ever. It installs to `~/Applications` and symlinks the CLI into
+`~/.local/bin`, both of which you own, so rebuilding never asks for a
+password. The app bundle exists for one reason: macOS reads an app's name and
+icon only from a bundle, so a bare binary shows up in the Dock as "exec".
 
 **Requires:** macOS 15+ (system-audio capture uses Core Audio process taps),
 Apple Silicon (transcription runs on the Neural Engine). Models (~600 MB)

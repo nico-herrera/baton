@@ -98,14 +98,20 @@ struct Install: ParsableCommand {
         // Prefer the app-bundle binary: running from inside patchthrough.app
         // gives the process real LaunchServices identity — Dock label and
         // icon, and TCC dialogs that say "patchthrough" instead of "exec".
-        // /usr/local/bin/patchthrough (usually a symlink into the bundle) is
-        // the CLI path and the fallback.
-        let bundled = "/Applications/patchthrough.app/Contents/MacOS/patchthrough"
-        if FileManager.default.isExecutableFile(atPath: bundled) {
+        //
+        // ~/Applications first, and deliberately: it's user-owned, so
+        // installing and updating never needs an admin password. /Applications
+        // is checked second for machines where someone installed system-wide.
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let bundles = [
+            "\(home)/Applications/patchthrough.app/Contents/MacOS/patchthrough",
+            "/Applications/patchthrough.app/Contents/MacOS/patchthrough",
+        ]
+        for bundled in bundles where FileManager.default.isExecutableFile(atPath: bundled) {
             return bundled
         }
-        let candidate = "/usr/local/bin/patchthrough"
-        if FileManager.default.isExecutableFile(atPath: candidate) {
+        for candidate in ["\(home)/.local/bin/patchthrough", "/usr/local/bin/patchthrough"]
+        where FileManager.default.isExecutableFile(atPath: candidate) {
             return candidate
         }
         // Fall back to the running executable's resolved path.

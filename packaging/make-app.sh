@@ -121,6 +121,25 @@ else
 fi
 
 say "→ $APP"
-say "install:"
-echo "  sudo rm -rf /Applications/patchthrough.app && sudo cp -R $APP /Applications/"
-echo "  sudo ln -sf /Applications/patchthrough.app/Contents/MacOS/patchthrough /usr/local/bin/patchthrough"
+# --- install ---------------------------------------------------------------
+# ~/Applications and ~/.local/bin are user-owned, so updating never prompts
+# for an admin password. That matters more than it sounds: this binary gets
+# rebuilt often, and a password prompt per rebuild is the kind of friction
+# that stops people from updating.
+
+DEST="$HOME/Applications"
+BINDIR="$HOME/.local/bin"
+mkdir -p "$DEST" "$BINDIR"
+rm -rf "$DEST/patchthrough.app"
+cp -R "$APP" "$DEST/"
+ln -sf "$DEST/patchthrough.app/Contents/MacOS/patchthrough" "$BINDIR/patchthrough"
+
+say "installed → $DEST/patchthrough.app  (no password needed)"
+echo "  CLI: $BINDIR/patchthrough"
+case ":$PATH:" in
+  *":$BINDIR:"*) ;;
+  *) printf '\033[33m  ! %s is not on your PATH — add to ~/.zshrc:\n      export PATH="%s:$PATH"\033[0m\n' "$BINDIR" "$BINDIR" ;;
+esac
+echo
+say "restart the daemon to pick it up:"
+echo "  patchthrough install --launch-at-login"
