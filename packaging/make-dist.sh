@@ -57,9 +57,8 @@ TARBALL="dist/$NAME.tar.gz"
 # checksum reproducibility on the other end.
 say "packaging…"
 tar --no-mac-metadata -czf "$TARBALL" -C dist "patchthrough.app"
-shasum -a 256 "$TARBALL" | awk '{print $1}' > "$TARBALL.sha256"
-
-SHA="$(cat "$TARBALL.sha256")"
+SHA="$(shasum -a 256 "$TARBALL" | awk '{print $1}')"
+printf '%s  %s\n' "$SHA" "$(basename "$TARBALL")" > "$TARBALL.sha256"
 
 # Keep the npm version, release tag, filename, checksum, and signer together.
 # This intentionally leaves the two metadata files changed so they can be

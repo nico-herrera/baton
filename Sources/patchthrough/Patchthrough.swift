@@ -5,9 +5,32 @@ import Foundation
 
 @main
 struct Patchthrough: ParsableCommand {
+    private static var releaseVersion: String {
+        let key = "CFBundleShortVersionString"
+        if let version = Bundle.main.object(forInfoDictionaryKey: key) as? String {
+            return version
+        }
+
+        // CLI invocations commonly arrive through ~/.local/bin/patchthrough.
+        // Resolve that symlink back into the app bundle so `--version` reports
+        // the same value Finder and npm expose.
+        let executable = URL(fileURLWithPath: CommandLine.arguments[0])
+            .resolvingSymlinksInPath()
+        let app = executable
+            .deletingLastPathComponent() // MacOS
+            .deletingLastPathComponent() // Contents
+            .deletingLastPathComponent() // patchthrough.app
+        if let bundle = Bundle(url: app),
+           let version = bundle.object(forInfoDictionaryKey: key) as? String {
+            return version
+        }
+        return "development"
+    }
+
     static let configuration = CommandConfiguration(
         commandName: "patchthrough",
         abstract: "Record a meeting, transcribe it on-device, hand the transcript to your coding agent.",
+        version: releaseVersion,
         subcommands: [Run.self, Hand.self, Transcripts.self, Doctor.self, Install.self],
         defaultSubcommand: Run.self
     )

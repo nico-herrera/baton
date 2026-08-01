@@ -25,6 +25,7 @@ const previousArtifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
 
 packageJson.version = version;
 const artifact = {
+  ...(previousArtifact._comment ? { _comment: previousArtifact._comment } : {}),
   version,
   repo: previousArtifact.repo,
   tag: `v${version}`,
