@@ -1,6 +1,6 @@
 {
   "name": "patchthrough",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Record the meeting, transcribe it on-device, patch the transcript through to your coding agent — Claude Code, Copilot, Codex, Kimi, opencode, Cursor.",
   "keywords": [
     "meeting",
@@ -27,8 +27,12 @@
   },
   "license": "MIT",
   "author": "Nico Herrera",
-  "os": ["darwin"],
-  "cpu": ["arm64"],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
   "engines": {
     "node": ">=18"
   },
