@@ -193,10 +193,9 @@ enum Handoff {
             }
 
         case .appClipboard(let appName):
-            // No prompt API — everything self-contained on the clipboard:
-            // instructions first, verbatim transcript below. One paste.
-            let payload = appPrompt(for: session) + "\n\n---\n\n" + handoffDocument(for: session)
-            pbcopy(payload)
+            // No prompt API — the handoff document is self-contained: it
+            // carries both the task instructions and verbatim transcript.
+            pbcopy(handoffDocument(for: session))
             let open = Process()
             open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
             open.arguments = ["-a", appName]
@@ -302,20 +301,22 @@ enum Handoff {
         }
     }
 
-    /// Prompt variant for chat apps, where the transcript is pasted inline
-    /// rather than staged as a repo file.
-    static func appPrompt(for session: Session) -> String {
+    /// Instructions that travel inside every handoff document. Keeping them
+    /// with the transcript means attachments, dragged files, folder handoffs,
+    /// and clipboard handoffs all tell the receiving agent what to do.
+    static func taskInstructions(for session: Session) -> String {
         """
-        Below is the transcript of a meeting I just had (\(session.duration), \
-        machine-transcribed). Work out what it asks of me, then give me:
+        Read the transcript below and work out what this meeting asks of me. \
+        Before changing anything, give me:
 
         1. Concrete work items it implies, ordered by what should happen first.
         2. Anything stated as a decision or constraint I shouldn't relitigate.
         3. Anything ambiguous, contradictory, or that reads like a transcription error — ask rather than guess.
+        4. Anything discussed that the current project may already do or contradict.
 
         It's speech-to-text, so it's messy: unreliable punctuation, garbled \
         technical terms, 'me'/'them' instead of names. Read for intent, not \
-        literal wording.
+        literal wording. Don't edit anything until we've agreed the list.
         """
     }
 
@@ -440,7 +441,13 @@ enum Handoff {
 
         let truncationNote = session.cleanStop ? "" : " (recording ended uncleanly — may be truncated)"
         return """
-        # Meeting transcript — \(session.name)
+        # Meeting handoff — \(session.name)
+
+        ## Instructions
+
+        \(taskInstructions(for: session))
+
+        ## Recording
 
         - Duration: \(session.duration)\(truncationNote)
         - Speakers: `me` = this machine's microphone. `them` = everything the Mac \
@@ -450,7 +457,7 @@ enum Handoff {
         phonetically close to something plausible, it probably is that.
         - Source: `\(session.dir.path)`
 
-        ---
+        ## Transcript
 
         \(body)
         """
@@ -536,7 +543,7 @@ enum Handoff {
 
     /// Launch the agent in a fresh Terminal window (menu-bar path, where
     /// there's no TTY to inherit).
-    static func launchInTerminal(agent: Agent, prompt: String, cwd: URL) {
+    static func launchInTerminal(agent: Agent, at path: String, prompt: String, cwd: URL) {
         // The prompt goes through a temp file → environment, never through
         // shell interpolation: transcript-derived text must not reach a shell.
         let stagedPrompt = FileManager.default.temporaryDirectory
@@ -546,24 +553,17 @@ enum Handoff {
         let launcher: String
         switch agent.launch {
         case .positionalPrompt:
-            launcher = "\(agent.name) \"$(cat \(shq(stagedPrompt.path)))\"; rm -f \(shq(stagedPrompt.path))"
+            launcher = "\(shq(path)) \"$(cat \(shq(stagedPrompt.path)))\"; rm -f \(shq(stagedPrompt.path))"
         case .runSubcommand:
-            launcher = "\(agent.name) run \"$(cat \(shq(stagedPrompt.path)))\"; rm -f \(shq(stagedPrompt.path))"
+            launcher = "\(shq(path)) run \"$(cat \(shq(stagedPrompt.path)))\"; rm -f \(shq(stagedPrompt.path))"
         case .clipboardThenPlain:
-            launcher = "cat \(shq(stagedPrompt.path)) | pbcopy; rm -f \(shq(stagedPrompt.path)); echo 'prompt on clipboard — ⌘V once \(agent.name) is up'; \(agent.name)"
+            launcher = "cat \(shq(stagedPrompt.path)) | pbcopy; rm -f \(shq(stagedPrompt.path)); echo 'prompt on clipboard — ⌘V once \(agent.name) is up'; \(shq(path))"
         }
         let command = "cd \(shq(cwd.path)) && PATH=\(shq(searchDirs.joined(separator: ":"))):\"$PATH\" \(launcher)"
 
-        let script = """
-        tell application "Terminal"
-            activate
-            do script \(asQuote(command))
-        end tell
-        """
-        let osa = Process()
-        osa.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        osa.arguments = ["-e", script]
-        try? osa.run()
+        // Whichever terminal the user picked — their shell profile, and so the
+        // agent's environment, comes from that app rather than from Terminal.app.
+        TerminalApp.current().run(command)
     }
 
     // MARK: - helpers

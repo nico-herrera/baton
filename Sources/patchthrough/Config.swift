@@ -70,6 +70,14 @@ enum Config {
         transcription()?["enabled"] as? Bool ?? true
     }
 
+    /// Bundle identifier of the terminal that CLI handoffs open in, or nil for
+    /// the default (Terminal.app). Your shell profile comes from whichever
+    /// terminal runs the command, so this is not cosmetic.
+    static func terminal() -> String? {
+        guard let id = load()?["terminal"] as? String, !id.isEmpty else { return nil }
+        return id
+    }
+
     // MARK: - Writing
 
     /// Merge a set of values into the config file, creating it if needed.
@@ -107,6 +115,18 @@ enum Config {
 
     /// Where the config lives, for showing in the UI.
     static var configPath: URL { path }
+
+    /// The most specific path that actually exists, for revealing in Finder.
+    /// The config file is only written once a setting has been saved, and
+    /// `activateFileViewerSelecting` silently does nothing for a path that
+    /// isn't there — so fall back to the containing directory, creating it so
+    /// there is always something to show.
+    static func revealTarget() -> URL {
+        if FileManager.default.fileExists(atPath: path.path) { return path }
+        let dir = path.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
 
     /// Parse the config file. A malformed config is reported on stderr rather
     /// than silently ignored — recordings landing in an unexpected place is

@@ -50,10 +50,19 @@ accident, and your `.gitignore` isn't touched.
 ## Install
 
 ```sh
+npm i -g patchthrough
+patchthrough install --launch-at-login   # optional: run in the background from login
+```
+
+The npm package pins one exact signed GitHub release, verifies its SHA-256 and
+Apple Developer Team ID, and installs it to `~/Applications` without `sudo`.
+
+To build from source instead:
+
+```sh
 git clone https://github.com/nico-herrera/patchthrough
 cd patchthrough
 ./packaging/make-app.sh                  # builds, signs, installs to ~/Applications
-patchthrough install --launch-at-login   # optional: run in the background from login
 ```
 
 No `sudo`, ever. It installs to `~/Applications` and symlinks the CLI into
@@ -124,7 +133,10 @@ still press send).
 
 And the universal door: the Patchthrough window (menu bar → Open Patchthrough) shows every
 session with a **drag chip** — drag the transcript file into any chat input
-anywhere, including apps Patchthrough has no button for.
+anywhere, including apps Patchthrough has no button for. The generated
+`handoff.md` is self-contained: it carries both the instructions for the agent
+and the verbatim transcript, so the command is not lost when a file is dragged
+or attached.
 
 Adding an agent or GUI target is a one-line entry in
 `Sources/patchthrough/Handoff.swift`.
@@ -145,9 +157,12 @@ supply-chain posture is deliberate:
   checkout doesn't match the lockfile, or if a dependency checkout has local
   modifications. `packaging/verify-models.sh` does the same for the downloaded
   model files, which are executed by Core ML and otherwise covered by nothing.
-- **No resource bundle, no app bundle.** One binary; the Info.plist is linked
-  into `__TEXT,__info_plist` so TCC attributes microphone and system-audio
-  permission to the binary itself.
+- **Pinned npm installer.** Each npm version names one GitHub release asset and
+  pins its SHA-256 plus the expected Apple Developer Team ID. Publishing fails
+  if the package metadata and public release drift apart.
+- **Small native app bundle.** The executable, Info.plist, icon, and required
+  assets live in a normal signed macOS bundle so Dock identity and TCC
+  permissions stay attached to Patchthrough.
 
 ## Gotchas
 

@@ -1,5 +1,6 @@
 import AppKit
 import ArgumentParser
+import CoreFoundation
 import Foundation
 
 @main
@@ -167,7 +168,17 @@ struct Run: ParsableCommand {
 
     @MainActor
     private func runMain() throws {
+        // Finder/Dock launches the bundle with only argv[0]. The LaunchAgent
+        // explicitly passes `run`, so it stays menu-bar-only; `--window`
+        // remains available for a direct CLI preview.
+        let launchedFromAppBundle = Bundle.main.bundleURL.pathExtension.lowercased() == "app"
+            && CommandLine.arguments.count == 1
+        if launchedFromAppBundle, signalExistingAppToOpen() {
+            return
+        }
+
         let root = Config.resolveRoot(cliOverride: out)
+        let opensWindowAtLaunch = window || launchedFromAppBundle
 
         // Non-blocking: permissions prompt on first recording, so warnings at
         // startup are informational, not fatal.
@@ -189,10 +200,16 @@ struct Run: ParsableCommand {
         AppIcon.apply()
 
         let controller = AppController(root: root)
-        if window {
+        app.delegate = controller
+        if opensWindowAtLaunch {
             // Defer until the run loop is pumping — ordering a window front
             // before app.run() silently no-ops for accessory apps.
             DispatchQueue.main.async { controller.openWindow() }
+        }
+        if ProcessInfo.processInfo.environment["PATCHTHROUGH_DEBUG_MENU"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                controller.openMenuForDebug()
+            }
         }
 
         // Ignore the default disposition *before* arming the sources, so there
@@ -222,9 +239,31 @@ struct Run: ParsableCommand {
         // already SIG_IGN, the signals then become silently ignored rather than
         // falling back to default-terminate. Verified: SIGTERM was a no-op
         // until this was wrapped.
-        withExtendedLifetime(signalSources) {
-            app.run()
+        withExtendedLifetime(controller) {
+            withExtendedLifetime(signalSources) {
+                app.run()
+            }
         }
+    }
+
+    /// A LaunchAgent-started app is not reopened reliably by LaunchServices.
+    /// Let the short-lived Finder/Dock launch signal that existing process and
+    /// exit; if there is no existing process, normal startup continues below.
+    @MainActor
+    private func signalExistingAppToOpen() -> Bool {
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.nicoherrera.patchthrough"
+        guard NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .contains(where: { $0.processIdentifier != getpid() })
+        else { return false }
+
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            AppController.openWindowNotification,
+            nil,
+            nil,
+            true
+        )
+        return true
     }
 }
 
@@ -245,7 +284,11 @@ struct Doctor: ParsableCommand {
 /// Owns the menu bar, the current recording session, and the elapsed-time
 /// ticker. All state transitions happen on the main actor.
 @MainActor
-final class AppController {
+final class AppController: NSObject, NSApplicationDelegate {
+    static let openWindowNotification = CFNotificationName(
+        "com.nicoherrera.patchthrough.openWindow" as CFString
+    )
+
     private let root: URL
     private let menuBar = MenuBarController()
     private let transcription = TranscriptionCoordinator()
@@ -257,14 +300,43 @@ final class AppController {
 
     init(root: URL) {
         self.root = root
-        store = SessionStore(root: root)
-        windowController = PatchthroughWindowController(store: store)
+        let store = SessionStore(root: root)
+        self.store = store
+        self.windowController = PatchthroughWindowController(store: store)
+        super.init()
         store.onToggleRecording = { [weak self] in self?.toggle() }
         menuBar.onToggle = { [weak self] in self?.toggle() }
         menuBar.onOpenFolder = { [weak self] in self?.openFolder() }
         menuBar.onOpenWindow = { [weak self] in self?.openWindow() }
         menuBar.onQuit = { [weak self] in self?.shutdown() }
         menuBar.onHandoff = { [weak self] agent in self?.handOff(to: agent) }
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            { _, observer, _, _, _ in
+                guard let observer else { return }
+                let controller = Unmanaged<AppController>
+                    .fromOpaque(observer)
+                    .takeUnretainedValue()
+                DispatchQueue.main.async { controller.openWindow() }
+            },
+            Self.openWindowNotification.rawValue,
+            nil,
+            .deliverImmediately
+        )
+        let appleEvents = NSAppleEventManager.shared()
+        appleEvents.setEventHandler(
+            self,
+            andSelector: #selector(openWindowFromAppleEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kCoreEventClass),
+            andEventID: AEEventID(kAEOpenApplication)
+        )
+        appleEvents.setEventHandler(
+            self,
+            andSelector: #selector(openWindowFromAppleEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kCoreEventClass),
+            andEventID: AEEventID(kAEReopenApplication)
+        )
         menuBar.update(recording: false, elapsed: nil)
         refreshHandoffMenu()
 
@@ -278,6 +350,26 @@ final class AppController {
         }
 
         watchRecordingsRoot()
+    }
+
+    @objc private func openWindowFromAppleEvent(_ event: NSAppleEventDescriptor,
+                                                withReplyEvent reply: NSAppleEventDescriptor) {
+        openWindow()
+    }
+
+    /// Finder and Dock deliver a reopen event to the existing LaunchAgent
+    /// process. Promote it from accessory mode and bring the GUI forward.
+    func applicationShouldHandleReopen(_ sender: NSApplication,
+                                       hasVisibleWindows flag: Bool) -> Bool {
+        openWindow()
+        return true
+    }
+
+    /// LaunchServices activates the LaunchAgent process when the bundle is
+    /// clicked, but does not consistently send it a reopen Apple event.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard !windowController.hasPresentableWindow else { return }
+        openWindow()
     }
 
     /// The redesign removed the Refresh button: the list reloads itself when
@@ -302,6 +394,11 @@ final class AppController {
     /// Show the main window (session list + transcript + dispatch).
     func openWindow() {
         windowController.show()
+    }
+
+    /// See `MenuBarController.openMenuForDebug()`.
+    func openMenuForDebug() {
+        menuBar.openMenuForDebug()
     }
 
     /// Rebuild the patch-through menu from the ranked destinations and
@@ -384,6 +481,7 @@ final class AppController {
         }
         Handoff.launchInTerminal(
             agent: match.agent,
+            at: match.path,
             prompt: Handoff.prompt(for: session),
             cwd: repo
         )

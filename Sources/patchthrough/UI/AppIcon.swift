@@ -31,7 +31,8 @@ enum AppIcon {
             // Squircle ground: rx 229.4 at 1024 (22.4%), Signal red.
             let radius = 229.4 * s
             let plate = NSRect(x: 0, y: 0, width: side, height: side)
-            NSColor(calibratedRed: 0xD2 / 255, green: 0x37 / 255, blue: 0x1B / 255, alpha: 1).setFill()
+            // sRGB, not calibrated: generic RGB renders #D2371B as #DD4D23.
+            NSColor(srgbRed: 0xD2 / 255, green: 0x37 / 255, blue: 0x1B / 255, alpha: 1).setFill()
             NSBezierPath(roundedRect: plate, xRadius: radius, yRadius: radius).fill()
 
             // Art: translate(184,184) scale(27.333) on the 24-grid — i.e. the
@@ -44,7 +45,7 @@ enum AppIcon {
                 NSPoint(x: originX + x * unit, y: originY + (24 - (y - 0.45)) * unit)
             }
 
-            let paper = NSColor(calibratedRed: 0xFF / 255, green: 0xF9 / 255, blue: 0xF4 / 255, alpha: 1)
+            let paper = NSColor(srgbRed: 0xFF / 255, green: 0xF9 / 255, blue: 0xF4 / 255, alpha: 1)
             paper.setStroke()
             let lineWidth = 2.1 * unit
 

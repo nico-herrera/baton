@@ -37,11 +37,15 @@
     "patchthrough-setup": "install.js"
   },
   "scripts": {
+    "check": "node verify.js",
+    "prepack": "npm run check",
+    "prepublishOnly": "node verify.js --release",
     "postinstall": "node install.js"
   },
   "files": [
     "bin/",
     "install.js",
+    "verify.js",
     "artifact.json",
     "README.md"
   ]

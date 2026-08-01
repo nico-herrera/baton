@@ -15,7 +15,8 @@
 //     npm-wrapped binaries check only a hash, if that.
 //   · Any failure aborts and leaves nothing behind. There is no "continue
 //     anyway" path.
-//   · No network access beyond the one pinned GitHub release URL.
+//   · The download starts at the one pinned GitHub release URL and follows
+//     only HTTPS redirects. The pinned hash still decides which bytes can run.
 //
 // If you'd rather not run install scripts at all (reasonable), use
 // `npm i -g patchthrough --ignore-scripts` — the bin wrapper will then tell
@@ -73,7 +74,18 @@ function download(from, redirects = 0) {
     https.get(from, { headers: { 'User-Agent': 'patchthrough-npm' } }, (res) => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
         res.resume();
-        return download(res.headers.location, redirects + 1).then(resolve, reject);
+        const location = res.headers.location;
+        if (!location) return reject(new Error(`HTTP ${res.statusCode} without a redirect location`));
+        let next;
+        try {
+          next = new URL(location, from);
+        } catch (e) {
+          return reject(new Error(`invalid redirect URL: ${e.message}`));
+        }
+        if (next.protocol !== 'https:') {
+          return reject(new Error(`refusing non-HTTPS redirect to ${next}`));
+        }
+        return download(next.toString(), redirects + 1).then(resolve, reject);
       }
       if (res.statusCode !== 200) {
         res.resume();

@@ -10,6 +10,7 @@
 # symlink into the bundle, so both worlds keep working.
 #
 #   ./packaging/make-app.sh          build → dist/patchthrough.app
+#   PATCHTHROUGH_VERSION=1.2.3 ./packaging/make-app.sh
 #   sudo installs are handled by the caller.
 
 set -euo pipefail
@@ -43,7 +44,7 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/patchthrough.icns"
 
 # --- bundle plist ----------------------------------------------------------
 
-VERSION="0.1.0"
+VERSION="${PATCHTHROUGH_VERSION:-0.1.0}"
 BUILD="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

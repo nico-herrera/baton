@@ -133,8 +133,7 @@ final class MenuBarController {
             // ● Recording  1:04 — Signal, monospaced digits.
             let s = NSMutableAttributedString(
                 string: "● Recording",
-                attributes: [.foregroundColor: NSColor(
-                    calibratedRed: 0xD2/255, green: 0x37/255, blue: 0x1B/255, alpha: 1)]
+                attributes: [.foregroundColor: PT.NS.signal]
             )
             if let elapsed {
                 s.append(NSAttributedString(
@@ -146,13 +145,35 @@ final class MenuBarController {
             stateLabel.attributedTitle = s
             toggleItem.title = "Stop & transcribe"
             toggleItem.subtitle = "mic + system audio · 2 tracks"
+            toggleItem.image = Self.dotImage(square: true)
         } else {
-            stateLabel.attributedTitle = nil
+            // The idle header is a dim status line, not a peer of the actions.
             let n = model.sessionCount
-            stateLabel.title = "● Idle · \(n) session\(n == 1 ? "" : "s")"
+            stateLabel.attributedTitle = NSAttributedString(
+                string: "● Idle · \(n) session\(n == 1 ? "" : "s")",
+                attributes: [.foregroundColor: NSColor.tertiaryLabelColor,
+                             .font: NSFont.systemFont(ofSize: NSFont.systemFontSize(for: .small))]
+            )
             toggleItem.title = "Start recording"
             toggleItem.subtitle = nil
+            toggleItem.image = Self.dotImage(square: false)
         }
+    }
+
+    /// The record/stop glyph beside the toggle: a Signal disc at rest, a
+    /// Signal square while recording. Non-template so it keeps its colour.
+    private static func dotImage(square: Bool) -> NSImage {
+        let side = PT.M.menuGlyphSize
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            PT.NS.signal.setFill()
+            let path = square
+                ? NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2)
+                : NSBezierPath(ovalIn: rect)
+            path.fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
     }
 
     private func renderPatchItems() {
@@ -210,7 +231,7 @@ final class MenuBarController {
     private static func markImage(weight: MarkWeight) -> NSImage? {
         let svg = markSVG(weight: weight == .regular ? 1.6 : 2.1)
         guard let data = svg.data(using: .utf8), let image = NSImage(data: data) else { return nil }
-        image.size = NSSize(width: 18, height: 18)
+        image.size = NSSize(width: PT.M.statusItemSize, height: PT.M.statusItemSize)
         return image
     }
 
@@ -226,18 +247,17 @@ final class MenuBarController {
         }
         guard recordingDot == nil else { return }
 
-        let dot = NSView(frame: NSRect(x: button.bounds.maxX - 10, y: 2, width: 7, height: 7))
+        let dot = NSView(frame: NSRect(x: button.bounds.maxX - PT.M.recordDotSize - 3, y: 2,
+                                        width: PT.M.recordDotSize, height: PT.M.recordDotSize))
         dot.autoresizingMask = [.minXMargin, .maxYMargin]
         dot.wantsLayer = true
-        dot.layer?.backgroundColor = NSColor(
-            calibratedRed: 0xD2/255, green: 0x37/255, blue: 0x1B/255, alpha: 1
-        ).cgColor
-        dot.layer?.cornerRadius = 3.5
+        dot.layer?.backgroundColor = PT.NS.signal.cgColor
+        dot.layer?.cornerRadius = PT.M.recordDotSize / 2
 
         let pulse = CABasicAnimation(keyPath: "opacity")
         pulse.fromValue = 1.0
         pulse.toValue = 0.35
-        pulse.duration = 0.8
+        pulse.duration = PT.M.pulseHalfPeriod
         pulse.autoreverses = true
         pulse.repeatCount = .infinity
         pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -245,6 +265,12 @@ final class MenuBarController {
 
         button.addSubview(dot)
         recordingDot = dot
+    }
+
+    /// Open the menu from code. A screenshot harness can't click the status
+    /// item without Accessibility permission, but the app can click its own.
+    func openMenuForDebug() {
+        statusItem.button?.performClick(nil)
     }
 
     @objc private func toggleClicked() { onToggle?() }
