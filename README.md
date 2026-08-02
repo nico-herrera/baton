@@ -47,44 +47,58 @@ The transcript lands in `.meeting/` inside your repo, which Patchthrough adds to
 repo's **local** git excludes — meeting content can't end up in a commit by
 accident, and your `.gitignore` isn't touched.
 
-## Install
+## Install the macOS app
 
-```sh
-npm i -g patchthrough
-patchthrough install --launch-at-login   # optional: run in the background from login
-```
+[Download Patchthrough-arm64.dmg](https://github.com/nico-herrera/patchthrough/releases/latest/download/Patchthrough-arm64.dmg),
+open it, and drag Patchthrough into Applications. Launch at login is available
+in Patchthrough Settings.
 
-The npm package pins one exact signed GitHub release, verifies its SHA-256 and
-Apple Developer Team ID, and installs it to `~/Applications` without `sudo`.
+Releases are signed with Developer ID, notarized by Apple, and published with a
+SHA-256 checksum, so they open on a normal double-click. This open-source
+project is distributed directly through GitHub rather than the Mac App Store;
+Developer ID is Apple's supported path for exactly that.
+
+If you build an unsigned copy yourself, note that macOS 15 removed the old
+right-click → **Open** bypass. Open **System Settings → Privacy & Security**,
+find the blocked-app notice, and choose **Open Anyway**.
 
 To build from source instead:
 
 ```sh
 git clone https://github.com/nico-herrera/patchthrough
 cd patchthrough
-./packaging/make-app.sh                  # builds, signs, installs to ~/Applications
+./packaging/make-app.sh                  # builds and installs to ~/Applications
 ```
 
-No `sudo`, ever. It installs to `~/Applications` and symlinks the CLI into
-`~/.local/bin`, both of which you own, so rebuilding never asks for a
-password. The app bundle exists for one reason: macOS reads an app's name and
-icon only from a bundle, so a bare binary shows up in the Dock as "exec".
+No `sudo` is needed for `~/Applications`. The app bundle gives macOS a stable
+name, icon, signature, and permission identity.
 
 **Requires:** macOS 15+ (system-audio capture uses Core Audio process taps),
 Apple Silicon (transcription runs on the Neural Engine). Models (~600 MB)
 download once on first transcription — record a short test while online before
-your first real meeting. `patchthrough doctor` tells you if they're cached.
+your first real meeting.
 
-## CLI
+## Command-line client
+
+The npm package is a separate, cross-platform transcript client. It does not
+download or install the macOS app and has no install scripts:
 
 ```sh
-patchthrough                        # run the menu-bar daemon (^C to quit)
+npm i -g patchthrough
+```
+
+```sh
 patchthrough hand [agent]           # hand the newest transcript to an agent, here
 patchthrough hand claude -s <session> -d <repo> -n
 patchthrough transcripts            # list sessions: length, status, first line
-patchthrough doctor                 # check permissions, folder, models
-patchthrough install --launch-at-login | --uninstall
+patchthrough hand codex --file meeting.md
 ```
+
+The CLI reads sessions written by the app, but it also accepts any transcript
+file or stdin and can be used without the app. See [`cli/`](cli/) for its full
+documentation. Upgrading from npm package 1.x leaves the already-installed app
+and recordings in place; it only replaces the old wrapper command with the new
+CLI.
 
 Sessions land in `~/Recordings/<yyyy.MM.dd-HHmm>/`: the two audio tracks,
 `meta.json`, `transcript.json` (timed, speaker-tagged segments), and
@@ -157,9 +171,10 @@ supply-chain posture is deliberate:
   checkout doesn't match the lockfile, or if a dependency checkout has local
   modifications. `packaging/verify-models.sh` does the same for the downloaded
   model files, which are executed by Core ML and otherwise covered by nothing.
-- **Pinned npm installer.** Each npm version names one GitHub release asset and
-  pins its SHA-256 plus the expected Apple Developer Team ID. Publishing fails
-  if the package metadata and public release drift apart.
+- **No npm install scripts.** The npm package is plain JavaScript. It never
+  downloads or executes a native binary during installation.
+- **Documented handoff contract.** The app and CLI communicate through the
+  versioned session files documented in [`schemas/session-v1.md`](schemas/session-v1.md).
 - **Small native app bundle.** The executable, Info.plist, icon, and required
   assets live in a normal signed macOS bundle so Dock identity and TCC
   permissions stay attached to Patchthrough.
@@ -173,6 +188,20 @@ supply-chain posture is deliberate:
 - Parakeet is English-only.
 - Expect ASR errors on proper nouns and identifiers; the handoff prompt warns
   the agent about exactly this.
+
+## Releases
+
+The app and CLI share this repository and the session-file contract, but they
+release independently:
+
+- `./packaging/make-dist.sh <version>` builds the signed disk image, and
+  `./packaging/notarize.sh` notarizes and staples it before it is attached to a
+  GitHub release.
+- `cd cli && npm publish` publishes the JavaScript CLI. CLI releases use tags
+  such as `cli-v2.0.0`; app releases retain `v1.0.2`-style tags.
+
+Changing `schemas/session-v1.md` requires compatibility coverage in the CLI
+tests and a fallback for sessions written by older app versions.
 
 ## Credits
 

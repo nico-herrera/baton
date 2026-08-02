@@ -1,53 +1,43 @@
 import ArgumentParser
 import Foundation
 
-/// Manage patchthrough's LaunchAgent so the daemon starts at login.
-///
-/// We deliberately do NOT use SMAppService.mainApp here — that requires a full
-/// .app bundle. Since patchthrough ships as a single binary in /usr/local/bin, a
-/// plain LaunchAgent plist is the simpler, more honest mechanism.
-struct Install: ParsableCommand {
-    static let configuration = CommandConfiguration(
-        abstract: "Install or remove the launch-at-login LaunchAgent."
-    )
+enum LaunchAtLoginError: Error, LocalizedError {
+    case appBundleNotFound
+    case launchctl(status: Int32, message: String)
 
-    @Flag(name: .long, help: "Register patchthrough to start at login.")
-    var launchAtLogin: Bool = false
-
-    @Flag(name: .long, help: "Remove the launch-at-login agent.")
-    var uninstall: Bool = false
-
-    func run() throws {
-        if launchAtLogin == uninstall {
-            FileHandle.standardError.write(Data(
-                "specify exactly one of --launch-at-login or --uninstall\n".utf8
-            ))
-            throw ExitCode(64)
-        }
-
-        if uninstall {
-            try removeAgent()
-        } else {
-            try writeAgent()
+    var errorDescription: String? {
+        switch self {
+        case .appBundleNotFound:
+            return "Launch at login requires Patchthrough.app in ~/Applications or /Applications."
+        case .launchctl(let status, let message):
+            return "launchctl exited \(status): \(message)"
         }
     }
+}
 
-    // MARK: -
+/// The native app owns its background lifecycle. The npm package is a
+/// standalone transcript client and never installs or launches the app.
+enum LaunchAtLogin {
+    static let label = "com.nicoherrera.patchthrough"
 
-    private static let label = "com.nicoherrera.patchthrough"
+    static var isEnabled: Bool {
+        FileManager.default.fileExists(atPath: plistURL.path)
+    }
 
-    private var plistURL: URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return home
+    static func setEnabled(_ enabled: Bool) throws {
+        if enabled { try enable() } else { try disable() }
+    }
+
+    private static var plistURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
-            .appendingPathComponent("\(Self.label).plist")
+            .appendingPathComponent("\(label).plist")
     }
 
-    private func writeAgent() throws {
-        let binary = try resolveBinaryPath()
-
+    private static func enable() throws {
+        let binary = try resolveAppBinary()
         let plist: [String: Any] = [
-            "Label": Self.label,
+            "Label": label,
             "ProgramArguments": [binary, "run"],
             "RunAtLoad": true,
             "KeepAlive": ["SuccessfulExit": false] as [String: Any],
@@ -56,9 +46,8 @@ struct Install: ParsableCommand {
             "StandardErrorPath": "/tmp/patchthrough.err.log",
         ]
 
-        let url = plistURL
         try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
+            at: plistURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
         let data = try PropertyListSerialization.data(
@@ -66,87 +55,86 @@ struct Install: ParsableCommand {
             format: .xml,
             options: 0
         )
-        try data.write(to: url, options: .atomic)
+        try data.write(to: plistURL, options: .atomic)
 
-        // Best-effort bootstrap; ignore failure if already loaded.
-        _ = runLaunchctl(["bootout", "gui/\(uid())", url.path])
-        let result = runLaunchctl(["bootstrap", "gui/\(uid())", url.path])
-        if result.status != 0 {
-            FileHandle.standardError.write(Data(
-                "warning: launchctl bootstrap exited \(result.status):\n\(result.stderr)\n".utf8
-            ))
-        }
-
-        print("✓ launch-at-login installed")
-        print("  plist:  \(url.path)")
-        print("  binary: \(binary)")
-        print("  logs:   /tmp/patchthrough.out.log, /tmp/patchthrough.err.log")
-    }
-
-    private func removeAgent() throws {
-        let url = plistURL
-        if FileManager.default.fileExists(atPath: url.path) {
-            _ = runLaunchctl(["bootout", "gui/\(uid())", url.path])
-            try FileManager.default.removeItem(at: url)
-            print("✓ launch-at-login removed")
-        } else {
-            print("nothing to remove (no agent at \(url.path))")
+        _ = runLaunchctl(["bootout", "gui/\(getuid())/\(label)"])
+        let result = runLaunchctl(["bootstrap", "gui/\(getuid())", plistURL.path])
+        guard result.status == 0 else {
+            try? FileManager.default.removeItem(at: plistURL)
+            throw LaunchAtLoginError.launchctl(
+                status: result.status,
+                message: result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
         }
     }
 
-    private func resolveBinaryPath() throws -> String {
-        // Prefer the app-bundle binary: running from inside patchthrough.app
-        // gives the process real LaunchServices identity — Dock label and
-        // icon, and TCC dialogs that say "patchthrough" instead of "exec".
-        //
-        // ~/Applications first, and deliberately: it's user-owned, so
-        // installing and updating never needs an admin password. /Applications
-        // is checked second for machines where someone installed system-wide.
+    private static func disable() throws {
+        if FileManager.default.fileExists(atPath: plistURL.path) {
+            try FileManager.default.removeItem(at: plistURL)
+        }
+        // Removing the plist first is deliberate: bootout can terminate the
+        // calling app when it was itself launched by this job.
+        _ = runLaunchctl(["bootout", "gui/\(getuid())/\(label)"])
+    }
+
+    private static func resolveAppBinary() throws -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let bundles = [
+        let candidates = [
             "\(home)/Applications/patchthrough.app/Contents/MacOS/patchthrough",
             "/Applications/patchthrough.app/Contents/MacOS/patchthrough",
         ]
-        for bundled in bundles where FileManager.default.isExecutableFile(atPath: bundled) {
-            return bundled
+        if let binary = candidates.first(where: {
+            FileManager.default.isExecutableFile(atPath: $0)
+        }) {
+            return binary
         }
-        for candidate in ["\(home)/.local/bin/patchthrough", "/usr/local/bin/patchthrough"]
-        where FileManager.default.isExecutableFile(atPath: candidate) {
-            return candidate
+        if Bundle.main.bundleURL.pathExtension.lowercased() == "app",
+           let binary = Bundle.main.executableURL?.path,
+           FileManager.default.isExecutableFile(atPath: binary) {
+            return binary
         }
-        // Fall back to the running executable's resolved path.
-        let argv0 = CommandLine.arguments.first ?? "patchthrough"
-        if argv0.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: argv0) {
-            FileHandle.standardError.write(Data(
-                "note: /usr/local/bin/patchthrough not found; using \(argv0)\n".utf8
-            ))
-            return argv0
-        }
-        FileHandle.standardError.write(Data(
-            "couldn't locate the patchthrough binary. install it to /usr/local/bin/patchthrough first.\n".utf8
-        ))
-        throw ExitCode(1)
+        throw LaunchAtLoginError.appBundleNotFound
     }
 
-    private func uid() -> uid_t { getuid() }
-
-    private func runLaunchctl(_ args: [String]) -> (status: Int32, stderr: String) {
+    private static func runLaunchctl(_ arguments: [String]) -> (status: Int32, stderr: String) {
         let task = Process()
-        task.launchPath = "/bin/launchctl"
-        task.arguments = args
-        let errPipe = Pipe()
-        task.standardError = errPipe
+        task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        task.arguments = arguments
+        let errorPipe = Pipe()
+        task.standardError = errorPipe
         task.standardOutput = Pipe()
         do {
             try task.run()
         } catch {
-            return (-1, "\(error)")
+            return (-1, error.localizedDescription)
         }
         task.waitUntilExit()
-        let err = String(
-            data: errPipe.fileHandleForReading.readDataToEndOfFile(),
-            encoding: .utf8
-        ) ?? ""
-        return (task.terminationStatus, err)
+        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        return (task.terminationStatus, String(data: errorData, encoding: .utf8) ?? "")
+    }
+}
+
+/// Retained for source builds and diagnostics when invoking the executable
+/// inside Patchthrough.app directly. Normal users manage this in Settings.
+struct Install: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Install or remove the launch-at-login LaunchAgent."
+    )
+
+    @Flag(name: .long, help: "Register Patchthrough.app to start at login.")
+    var launchAtLogin = false
+
+    @Flag(name: .long, help: "Remove the launch-at-login agent.")
+    var uninstall = false
+
+    func run() throws {
+        if launchAtLogin == uninstall {
+            FileHandle.standardError.write(Data(
+                "specify exactly one of --launch-at-login or --uninstall\n".utf8
+            ))
+            throw ExitCode(64)
+        }
+        try LaunchAtLogin.setEnabled(launchAtLogin)
+        print(launchAtLogin ? "✓ launch at login enabled" : "✓ launch at login disabled")
     }
 }

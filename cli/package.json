@@ -1,0 +1,40 @@
+{
+  "name": "patchthrough",
+  "version": "2.0.0",
+  "description": "Hand meeting transcripts to coding agents from your terminal.",
+  "keywords": [
+    "meeting",
+    "transcript",
+    "claude-code",
+    "codex",
+    "copilot",
+    "cursor",
+    "coding-agent",
+    "cli"
+  ],
+  "homepage": "https://github.com/nico-herrera/patchthrough#command-line-client",
+  "bugs": "https://github.com/nico-herrera/patchthrough/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nico-herrera/patchthrough.git",
+    "directory": "cli"
+  },
+  "license": "MIT",
+  "author": "Nico Herrera",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "patchthrough": "bin/patchthrough.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node verify.js && npm test",
+    "prepack": "npm run check"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md"
+  ]
+}

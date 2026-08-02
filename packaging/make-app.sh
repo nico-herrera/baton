@@ -6,8 +6,8 @@
 # only reads identity (Dock label, Finder icon, TCC dialog name) from a
 # bundle. A bare binary promoted to .regular shows a generic icon and the
 # label "exec" in the Dock — a runtime NSApp.applicationIconImage fixes the
-# picture but nothing can fix the name. The CLI stays a plain command via a
-# symlink into the bundle, so both worlds keep working.
+# picture but nothing can fix the name. The npm CLI is a separate product and
+# no longer points into this bundle.
 #
 #   ./packaging/make-app.sh          build → dist/patchthrough.app
 #   PATCHTHROUGH_VERSION=1.2.3 ./packaging/make-app.sh
@@ -75,15 +75,32 @@ cp "$BIN" "$APP/Contents/MacOS/patchthrough"
 # App accent colour (Signal). macOS takes sidebar selection, toggles and
 # prominent buttons from the bundle's compiled AccentColor — SwiftUI .tint
 # alone cannot recolour sidebar selection.
-actool packaging/design/Assets.xcassets --compile "$APP/Contents/Resources" \
-  --platform macosx --minimum-deployment-target 15.0 \
-  --output-partial-info-plist /dev/null >/dev/null
+#
+# actool ships with full Xcode, not the Command Line Tools. A CLT-only machine
+# still produces a working bundle, it just inherits the system accent colour;
+# make-dist.sh refuses to cut a release without it.
+if xcrun --find actool >/dev/null 2>&1; then
+  actool packaging/design/Assets.xcassets --compile "$APP/Contents/Resources" \
+    --platform macosx --minimum-deployment-target 15.0 \
+    --output-partial-info-plist /dev/null >/dev/null
+else
+  say "actool needs full Xcode — building without the compiled AccentColor"
+fi
 
 # --- sign ------------------------------------------------------------------
+# --options runtime is what makes the bundle notarizable: Apple rejects any
+# submission without the hardened runtime. That runtime then denies microphone
+# access unless the audio-input entitlement is present, and denies it silently,
+# so these two flags have to travel together or recordings come back empty.
+#
+# No --deep: Apple deprecated it, and this bundle has no nested code to reach.
 
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "DAB6FR7R2R"; then
   say "signing bundle…"
-  codesign --force --deep --sign "$IDENTITY" --timestamp "$APP"
+  codesign --force --sign "$IDENTITY" --timestamp \
+    --options runtime \
+    --entitlements packaging/patchthrough.entitlements \
+    "$APP"
   codesign --verify --strict "$APP" || fail "bundle signature failed to verify"
 else
   say "no signing identity — bundle left unsigned"
@@ -91,24 +108,32 @@ fi
 
 say "→ $APP"
 # --- install ---------------------------------------------------------------
-# ~/Applications and ~/.local/bin are user-owned, so updating never prompts
-# for an admin password. That matters more than it sounds: this binary gets
-# rebuilt often, and a password prompt per rebuild is the kind of friction
-# that stops people from updating.
+# ~/Applications is user-owned, so updating never prompts for an admin
+# password. The standalone npm CLI owns the `patchthrough` shell command.
 
 DEST="$HOME/Applications"
-BINDIR="$HOME/.local/bin"
-mkdir -p "$DEST" "$BINDIR"
+mkdir -p "$DEST"
 rm -rf "$DEST/patchthrough.app"
 cp -R "$APP" "$DEST/"
-ln -sf "$DEST/patchthrough.app/Contents/MacOS/patchthrough" "$BINDIR/patchthrough"
+
+# Clean up only the symlink created by older app builds. Never remove a real
+# npm-installed command or a symlink owned by something else.
+LEGACY_CLI="$HOME/.local/bin/patchthrough"
+if [ -L "$LEGACY_CLI" ] && [ "$(readlink "$LEGACY_CLI")" = "$DEST/patchthrough.app/Contents/MacOS/patchthrough" ]; then
+  rm "$LEGACY_CLI"
+fi
+
+# Launch Services indexes every bundle it can see, so a build copy left in
+# dist/ shows up as a second Patchthrough in Launchpad and Spotlight: same
+# icon, same bundle ID, listed under its filename instead of its display name.
+# Unregistering it doesn't stick — the directory watcher re-adds it — so the
+# build copy has to go. make-dist.sh sets KEEP_DIST because it packages this
+# exact bundle, and deletes it itself once the tarball exists.
+if [ "${PATCHTHROUGH_KEEP_DIST:-0}" != "1" ]; then
+  rm -rf "$APP"
+fi
 
 say "installed → $DEST/patchthrough.app  (no password needed)"
-echo "  CLI: $BINDIR/patchthrough"
-case ":$PATH:" in
-  *":$BINDIR:"*) ;;
-  *) printf '\033[33m  ! %s is not on your PATH — add to ~/.zshrc:\n      export PATH="%s:$PATH"\033[0m\n' "$BINDIR" "$BINDIR" ;;
-esac
 echo
-say "restart the daemon to pick it up:"
-echo "  patchthrough install --launch-at-login"
+say "Open Patchthrough from ~/Applications."
+echo "  Launch at login can be enabled in Patchthrough Settings."

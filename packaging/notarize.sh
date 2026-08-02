@@ -1,9 +1,9 @@
 #!/bin/bash
 #
-# Optional: notarize the signed binary so Gatekeeper stops complaining and the
-# installer no longer has to strip a quarantine flag. Worth doing if the target
-# is a managed laptop where you'd rather not explain why you're deleting an
-# xattr.
+# Notarize the release DMG and staple the ticket to it. Stapled, the image
+# passes Gatekeeper even offline — the double-click-and-drag experience of any
+# commercial Mac app. Un-notarized downloads are blocked outright on macOS 15+,
+# so this step is part of every release, not an option.
 #
 # One-time setup — stores an app-specific password in your keychain:
 #
@@ -14,39 +14,45 @@
 #        --team-id DAB6FR7R2R \
 #        --password "xxxx-xxxx-xxxx-xxxx"
 #
-# Then:  ./packaging/notarize.sh dist/patchthrough-local-<sha>-arm64.tar.gz
+# Then:  ./packaging/notarize.sh dist/Patchthrough-arm64.dmg
 #
-# Note: notarization requires the hardened runtime, which this build does NOT
-# currently enable. If Apple rejects the submission for that reason, add
-#   --options runtime --entitlements packaging/patchthrough.entitlements
-# to the codesign call in make-release.sh, rebuild, and RE-TEST a recording:
-# hardened runtime denies microphone access unless the audio-input entitlement
-# is present, and that failure is silent.
+# Notarization requires the hardened runtime, which make-app.sh enables along
+# with packaging/patchthrough.entitlements. If you ever change those signing
+# flags, RE-TEST an actual recording: the hardened runtime denies microphone
+# access without the audio-input entitlement, and that failure is silent.
 
 set -euo pipefail
 
 PROFILE="patchthrough-notary"
-TARBALL="${1:-}"
+DMG="${1:-}"
 
 say()  { printf '\033[1m%s\033[0m\n' "$*"; }
 fail() { printf '\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
 
-[ -n "$TARBALL" ] || fail "usage: $0 dist/patchthrough-local-<sha>-arm64.tar.gz"
-[ -f "$TARBALL" ] || fail "no such file: $TARBALL"
+[ -n "$DMG" ] || fail "usage: $0 dist/Patchthrough-arm64.dmg"
+[ -f "$DMG" ] || fail "no such file: $DMG"
 
 xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1 \
   || fail "no stored credentials named '$PROFILE'.
 Run the store-credentials command in the header of this script first."
 
-say "submitting $TARBALL — this usually takes a few minutes…"
-xcrun notarytool submit "$TARBALL" \
+say "submitting $DMG — this usually takes a few minutes…"
+xcrun notarytool submit "$DMG" \
   --keychain-profile "$PROFILE" \
   --wait
 
+say "stapling the ticket…"
+xcrun stapler staple "$DMG"
+xcrun stapler validate "$DMG" || fail "staple did not validate"
+
+# Stapling rewrites the image, so any checksum computed before this point is
+# now wrong. Refresh it.
+if [ -f "$DMG.sha256" ]; then
+  SHA="$(shasum -a 256 "$DMG" | awk '{print $1}')"
+  printf '%s  %s\n' "$SHA" "$(basename "$DMG")" > "$DMG.sha256"
+  say "checksum refreshed: $SHA"
+fi
+
 echo
-say "A tarball can't carry a notarization ticket (only .app/.dmg/.pkg can be"
-say "stapled). The notarization is still recorded against the binary's hash,"
-say "so Gatekeeper will accept it once Apple's check propagates."
-echo
-say "verify with:"
-echo "  tar -xzf $TARBALL -C /tmp && spctl -a -vvv -t install /tmp/\$(basename ${TARBALL%.tar.gz})/patchthrough"
+say "verify like a user would:"
+echo "  spctl -a -vv -t open --context context:primary-signature $DMG"

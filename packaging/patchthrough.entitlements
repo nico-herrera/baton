@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The hardened runtime is mandatory for notarization, and it denies
+         microphone access unless this entitlement is present. The denial is
+         silent: the tap opens and delivers nothing but silence, so a build
+         missing this looks healthy right up until you play back the recording.
+         Core Audio process taps (system audio) are gated by the same key. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>

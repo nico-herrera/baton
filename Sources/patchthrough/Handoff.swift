@@ -266,10 +266,19 @@ enum Handoff {
     /// Write the self-describing handoff document next to the session's other
     /// files. Stable location, survives reboots, and is what gets dragged or
     /// attached. Idempotent.
+    static func writeHandoffFile(for session: Session) throws -> URL {
+        let out = session.dir.appendingPathComponent("handoff.md")
+        try handoffDocument(for: session).write(to: out, atomically: true, encoding: .utf8)
+        return out
+    }
+
+    /// UI actions should remain available even if a session folder becomes
+    /// unwritable between refresh and click. The transcription pipeline uses
+    /// the throwing variant above so it can record a useful warning.
     @discardableResult
     static func exportHandoffFile(for session: Session) -> URL {
         let out = session.dir.appendingPathComponent("handoff.md")
-        try? handoffDocument(for: session).write(to: out, atomically: true, encoding: .utf8)
+        _ = try? writeHandoffFile(for: session)
         return out
     }
 
