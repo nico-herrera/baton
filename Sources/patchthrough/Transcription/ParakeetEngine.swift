@@ -39,8 +39,8 @@ actor ParakeetEngine: TranscriptionEngine {
 
         // A track with no frames (recorder died before its first buffer)
         // makes AVFoundation raise an ObjC exception deep inside the
-        // resampler — uncatchable from Swift, so it takes the whole daemon
-        // down. Check readability up front instead.
+        // resampler. Swift cannot catch that exception, so it takes the whole
+        // daemon down. Check readability up front instead.
         do {
             let probe = try AVAudioFile(forReading: audio)
             guard probe.length > 0 else { throw EngineError.unreadableAudio(audio, nil) }

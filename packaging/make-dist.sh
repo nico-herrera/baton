@@ -10,8 +10,8 @@
 #   dist/Patchthrough-arm64.dmg.sha256
 #
 # The DMG name deliberately carries no version so the landing page can link
-# straight to .../releases/latest/download/Patchthrough-arm64.dmg — one click,
-# file downloads, like any commercial Mac app. The version lives in the release
+# straight to .../releases/latest/download/Patchthrough-arm64.dmg. One click
+# downloads the file, like any commercial Mac app. The version lives in the release
 # tag and in the bundle's Info.plist.
 
 set -euo pipefail
@@ -31,7 +31,7 @@ TRACKED_DIRTY="$(git status --porcelain --untracked-files=no)"
 RELEASE_UNTRACKED="$(git ls-files --others --exclude-standard -- \
   Package.swift Package.resolved Sources packaging)"
 if [ -n "$TRACKED_DIRTY" ] || [ -n "$RELEASE_UNTRACKED" ]; then
-  fail "release inputs are dirty — commit them first so the release matches a real commit:
+  fail "release inputs are dirty. Commit them first so the release matches a real commit:
 ${TRACKED_DIRTY}${RELEASE_UNTRACKED:+
 untracked release inputs:
 $RELEASE_UNTRACKED}"
@@ -41,13 +41,13 @@ fi
 # Command Line Tools-only machine. A release must not: check before the build
 # rather than after, so a missing Xcode doesn't cost a full compile.
 xcrun --find actool >/dev/null 2>&1 \
-  || fail "actool not found — release builds need full Xcode, not just the
+  || fail "actool not found. Release builds need full Xcode, not just the
 Command Line Tools. Install Xcode, then: sudo xcode-select -s /Applications/Xcode.app"
 
 # Build + sign the bundle (make-app.sh also installs locally, which is fine).
 say "building the app bundle…"
 PATCHTHROUGH_KEEP_DIST=1 PATCHTHROUGH_VERSION="$VERSION" ./packaging/make-app.sh >/dev/null 2>&1 \
-  || fail "make-app.sh failed — run it directly to see why"
+  || fail "make-app.sh failed. Run it directly to see why"
 
 APP="dist/patchthrough.app"
 [ -d "$APP" ] || fail "no bundle at $APP"
@@ -67,14 +67,14 @@ BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString'
 # Capture first, then match. Piping codesign straight into `grep -q` cannot work
 # under `set -o pipefail`: grep exits at the first match and closes the pipe,
 # codesign takes SIGPIPE partway through its unbuffered stderr, and pipefail
-# reports the pipeline as exit 141 — so a correctly signed bundle fails the
+# reports the pipeline as exit 141, so a correctly signed bundle fails the
 # check. Do not fold these back into a pipeline.
 SIGN_INFO="$(codesign -d --verbose=2 "$APP" 2>&1)"
 grep -q 'flags=.*runtime' <<<"$SIGN_INFO" \
-  || fail "bundle is not signed with the hardened runtime — notarization would be rejected"
+  || fail "bundle is not signed with the hardened runtime. Apple would reject notarization"
 ENTITLEMENTS="$(codesign -d --entitlements - --xml "$APP" 2>/dev/null)"
 grep -q 'com.apple.security.device.audio-input' <<<"$ENTITLEMENTS" \
-  || fail "bundle is missing the audio-input entitlement — the hardened runtime
+  || fail "bundle is missing the audio-input entitlement. The hardened runtime
 would silently deny microphone access to every user"
 
 say "signed by Team $TEAM"
@@ -112,7 +112,7 @@ echo "  sha256: $SHA"
 echo
 say "next:"
 echo "  1. ./packaging/notarize.sh $DMG"
-echo "     (not optional — an un-notarized download is blocked on macOS 15+."
+echo "     (not optional. macOS 15+ blocks an un-notarized download."
 echo "      Stapling changes the file, so notarize.sh refreshes the .sha256.)"
 echo "  2. gh release create v$VERSION $DMG $DMG.sha256 \\"
 echo "       --repo nico-herrera/patchthrough --title \"Patchthrough $VERSION\" --notes '…'"

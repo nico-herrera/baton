@@ -1,11 +1,12 @@
 #!/bin/bash
 #
 # Notarize the release DMG and staple the ticket to it. Stapled, the image
-# passes Gatekeeper even offline — the double-click-and-drag experience of any
-# commercial Mac app. Un-notarized downloads are blocked outright on macOS 15+,
-# so this step is part of every release, not an option.
+# passes Gatekeeper even offline. The image then gives the same
+# double-click-and-drag experience as any commercial Mac app. macOS 15+ blocks
+# un-notarized downloads outright, so this step is part of every release. It is
+# not an option.
 #
-# One-time setup — stores an app-specific password in your keychain:
+# One-time setup. This stores an app-specific password in your keychain:
 #
 #   1. Create an app-specific password at https://appleid.apple.com
 #      (Sign-In and Security → App-Specific Passwords)
@@ -36,7 +37,7 @@ xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1 \
   || fail "no stored credentials named '$PROFILE'.
 Run the store-credentials command in the header of this script first."
 
-say "submitting $DMG — this usually takes a few minutes…"
+say "submitting $DMG. This usually takes a few minutes…"
 xcrun notarytool submit "$DMG" \
   --keychain-profile "$PROFILE" \
   --wait

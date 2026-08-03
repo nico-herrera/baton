@@ -3,7 +3,7 @@ import CoreAudio
 import Foundation
 
 /// Records all system audio output to a file via a Core Audio process tap
-/// (macOS 14.2+). No virtual device, no kernel extension — the tap mixes every
+/// (macOS 14.2+). No virtual device and no kernel extension. The tap mixes every
 /// process's output to stereo and hands us buffers through a private aggregate
 /// device. First use triggers the one-time "System Audio Recording" TCC prompt
 /// and lights the purple recording indicator while active.
@@ -19,7 +19,7 @@ final class SystemAudioRecorder {
         var description: String {
             switch self {
             case .tapCreationFailed(let s):
-                return "process tap creation failed (OSStatus \(s)) — check System Settings → Privacy & Security → Screen & System Audio Recording"
+                return "process tap creation failed (OSStatus \(s)). Check System Settings → Privacy & Security → Screen & System Audio Recording"
             case .tapFormatUnreadable(let s): return "couldn't read tap stream format (OSStatus \(s))"
             case .aggregateCreationFailed(let s): return "aggregate device creation failed (OSStatus \(s))"
             case .ioProcCreationFailed(let s): return "IO proc creation failed (OSStatus \(s))"
@@ -35,13 +35,13 @@ final class SystemAudioRecorder {
     private var file: AVAudioFile?
     private let queue = DispatchQueue(label: "com.nicoherrera.patchthrough.system-tap")
     private(set) var isRecording = false
-    /// Wall-clock time of the first captured buffer — the track's true start,
-    /// used to offset-align the two tracks' transcript timestamps.
+    /// Wall-clock time of the first captured buffer. That time is the track's
+    /// true start, and it offset-aligns the two tracks' transcript timestamps.
     private(set) var firstBufferAt: Date?
 
-    /// Start capturing system audio, encoding AAC into `url` (use a .caf
-    /// extension — CAF needs no finalization pass, so a crash mid-meeting
-    /// loses nothing already written).
+    /// Start capturing system audio, encoding AAC into `url`. Use a .caf
+    /// extension, because CAF needs no finalization pass and a crash
+    /// mid-meeting loses nothing already written.
     func start(writingTo url: URL) throws {
         guard !isRecording else { return }
 

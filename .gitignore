@@ -1,5 +1,6 @@
 .build/
 .DS_Store
 
-# release artifacts — attached to GitHub releases, not committed
+# release artifacts: attached to GitHub releases, not committed
 /dist/
+CLAUDE.md

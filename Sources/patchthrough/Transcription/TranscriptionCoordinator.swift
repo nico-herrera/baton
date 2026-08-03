@@ -6,7 +6,7 @@ enum TranscriptionError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .allTracksFailed(let n):
-            return "all \(n) track(s) failed to transcribe — see the lines above for the per-track cause"
+            return "all \(n) track(s) failed to transcribe. See the lines above for the per-track cause"
         }
     }
 }
@@ -14,7 +14,7 @@ enum TranscriptionError: Error, CustomStringConvertible {
 /// Post-recording pipeline: a serial queue of session folders to transcribe.
 /// mic.caf → "me", system.caf → "them"; each track's segments are shifted by
 /// its start offset, merged by timestamp, and written as transcript.json
-/// (canonical) plus transcript.md (readable). The filesystem is the queue —
+/// (canonical) plus transcript.md (readable). The filesystem is the queue.
 /// `resumePending()` rescans at launch, so a crash or quit mid-transcription
 /// just retries on next run. Failures append to the session's transcribe.log
 /// and never block later jobs.
@@ -36,7 +36,7 @@ actor TranscriptionCoordinator {
     }
 
     /// Queue a finished session. With transcription disabled in config, the
-    /// on_stop hook still fires — it just gets an untranscribed folder.
+    /// on_stop hook still fires. The hook then gets an untranscribed folder.
     func enqueue(_ sessionDir: URL) {
         guard Config.transcriptionEnabled() else {
             runHook(for: sessionDir)
@@ -107,14 +107,14 @@ actor TranscriptionCoordinator {
             publish(.transcribing(session: dir.lastPathComponent, queued: queue.count))
             do {
                 try await transcribe(dir)
-                notifyUser(title: "Patchthrough — transcript ready", body: dir.lastPathComponent)
+                notifyUser(title: "Patchthrough: transcript ready", body: dir.lastPathComponent)
                 runHook(for: dir)
             } catch {
                 log(dir, "transcription failed: \(error)")
                 lastFailure = dir.lastPathComponent
                 notifyUser(
-                    title: "Patchthrough — transcription failed",
-                    body: "\(dir.lastPathComponent) — see transcribe.log"
+                    title: "Patchthrough: transcription failed",
+                    body: "\(dir.lastPathComponent). See transcribe.log"
                 )
             }
         }
@@ -143,7 +143,7 @@ actor TranscriptionCoordinator {
             attempted += 1
             log(dir, "transcribing \(track.file) (\(engine.name))")
             // One bad track (empty, truncated) shouldn't cost us the other's
-            // transcript — log it and keep going.
+            // transcript. Log the failure and keep going.
             let segments: [TranscriptSegment]
             do {
                 segments = try await engine.transcribe(audio)
@@ -165,8 +165,8 @@ actor TranscriptionCoordinator {
         // Every track we tried failed. Writing transcript.json here would be
         // actively harmful: it's the completion marker resumePending() keys on,
         // so a valid-looking 0-segment file permanently buries the session and
-        // fires a "transcript ready" notification for nothing. Throw instead —
-        // the caller logs to transcribe.log and reports .failed, and the
+        // fires a "transcript ready" notification for nothing. Throw instead.
+        // The caller logs to transcribe.log and reports .failed, and the
         // session stays eligible for a retry on next launch.
         if attempted > 0 && succeeded == 0 {
             throw TranscriptionError.allTracksFailed(attempted: attempted)
@@ -200,7 +200,7 @@ actor TranscriptionCoordinator {
             // transcription into a permanently non-retryable failure.
             log(dir, "could not create handoff.md: \(error)")
         }
-        log(dir, "done — \(merged.count) segments")
+        log(dir, "done: \(merged.count) segments")
     }
 
     private func preparedEngine() async throws -> TranscriptionEngine {
@@ -208,7 +208,7 @@ actor TranscriptionCoordinator {
         let configured = Config.transcriptionEngine()
         if configured != "parakeet" {
             FileHandle.standardError.write(Data(
-                "warning: unknown transcription engine \"\(configured)\" — using parakeet\n".utf8
+                "warning: unknown transcription engine \"\(configured)\". Using parakeet\n".utf8
             ))
         }
         let engine = ParakeetEngine()
@@ -278,7 +278,7 @@ private struct SessionMeta {
             let files = json["files"] as? [String: String]
         else { throw MetaError.unreadable(url) }
 
-        // Sessions recorded before offsets were captured default to 0 —
+        // Sessions recorded before offsets were captured default to 0. The
         // tracks start within tens of milliseconds of each other anyway.
         let offsets = json["start_offset_ms"] as? [String: Int] ?? [:]
         var tracks: [Track] = []
@@ -292,7 +292,7 @@ private struct SessionMeta {
     }
 }
 
-/// Canonical transcript. Property names are the JSON schema — this struct
+/// Canonical transcript. Property names are the JSON schema. This struct
 /// exists to be serialized.
 private struct Transcript: Codable {
     struct Segment: Codable {
@@ -309,7 +309,7 @@ private struct Transcript: Codable {
 
     /// Write transcript.json and render transcript.md. Both writes are atomic
     /// (temp file + rename), so a partially written transcript never exists on
-    /// disk — resumePending treats presence of transcript.json as "done".
+    /// disk. resumePending treats presence of transcript.json as "done".
     func write(to dir: URL) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

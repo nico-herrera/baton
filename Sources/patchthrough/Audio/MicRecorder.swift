@@ -2,8 +2,8 @@ import AVFoundation
 import Foundation
 
 /// Records the default input device to a file via AVAudioEngine, encoding AAC
-/// mono. Buffers stream straight to disk — nothing is held in memory, so
-/// session length is unbounded.
+/// mono. Buffers stream straight to disk. The recorder holds nothing in
+/// memory, so session length is unbounded.
 ///
 /// With voice processing on (the default), Apple's echo canceller subtracts
 /// speaker playback from the mic so the system track doesn't bleed into the
@@ -31,8 +31,8 @@ final class MicRecorder: @unchecked Sendable {
     private var file: AVAudioFile?
     private var url: URL?
     private(set) var isRecording = false
-    /// Wall-clock time of the first captured buffer — the track's true start,
-    /// used to offset-align the two tracks' transcript timestamps.
+    /// Wall-clock time of the first captured buffer. That time is the track's
+    /// true start, and it offset-aligns the two tracks' transcript timestamps.
     private(set) var firstBufferAt: Date?
 
     // Liveness check state (voice-processing path only). Written from the tap
@@ -41,8 +41,8 @@ final class MicRecorder: @unchecked Sendable {
     private var livenessPeak: Float = 0
     private var livenessSettled = false
 
-    /// Start capturing the mic, encoding AAC into `url` (use a .caf extension
-    /// — CAF needs no finalization pass, so a crash loses nothing written).
+    /// Start capturing the mic, encoding AAC into `url`. Use a .caf extension,
+    /// because CAF needs no finalization pass and a crash loses nothing written.
     func start(writingTo url: URL) throws {
         guard !isRecording else { return }
         self.url = url
@@ -73,13 +73,13 @@ final class MicRecorder: @unchecked Sendable {
             do {
                 try input.setVoiceProcessingEnabled(true)
                 // The live voice unit makes macOS treat the session like a
-                // call and duck all other audio — meetings played through the
+                // call and duck all other audio. A meeting played through the
                 // speakers would get quieter the moment recording starts.
                 input.voiceProcessingOtherAudioDuckingConfiguration =
                     .init(enableAdvancedDucking: false, duckingLevel: .min)
             } catch {
                 FileHandle.standardError.write(Data(
-                    "warning: mic voice processing unavailable (\(error)) — recording raw mic\n".utf8
+                    "warning: mic voice processing unavailable (\(error)). Recording raw mic\n".utf8
                 ))
                 voice = false
             }
@@ -87,7 +87,7 @@ final class MicRecorder: @unchecked Sendable {
         let inputFormat = input.outputFormat(forBus: 0)
 
         // One explicit mono client format. With voice processing this is the
-        // Voice I/O boundary format on both sides of the duplex unit — never
+        // Voice I/O boundary format on both sides of the duplex unit. Never
         // accept the inherited multichannel route format (a 9-channel device
         // yielded digital silence). Raw capture downmixes to the same shape;
         // speech models want one channel anyway.
@@ -119,7 +119,7 @@ final class MicRecorder: @unchecked Sendable {
         if voice {
             // Complete the duplex graph: VoiceProcessingIO must render to an
             // output device or the input side never produces audio. The mixer
-            // has no sources — nothing is monitored or played — its connection
+            // has no sources, and nothing is monitored or played. The connection
             // exists solely to give the unit a formatted output path.
             engine.connect(engine.mainMixerNode, to: engine.outputNode, format: monoFormat)
             livenessFrames = 0
@@ -146,7 +146,7 @@ final class MicRecorder: @unchecked Sendable {
 
     /// Voice-processing path: the unit converts to the mono client format
     /// itself, so tapped buffers write straight to the file. Tracks signal
-    /// peak over the first second — an unsupported route (device pair, macOS
+    /// peak over the first second. An unsupported route (device pair, macOS
     /// AUVPAggregate defects) delivers callbacks full of digital zeros, and
     /// the only recovery is restarting raw.
     private func installVoiceTap(on input: AVAudioInputNode, format: AVAudioFormat) {
@@ -212,7 +212,7 @@ final class MicRecorder: @unchecked Sendable {
     private func fallBackToRaw() {
         guard isRecording else { return }
         FileHandle.standardError.write(Data(
-            "warning: voice processing delivered silence — restarting mic raw\n".utf8
+            "warning: voice processing delivered silence. Restarting mic raw\n".utf8
         ))
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
@@ -225,7 +225,7 @@ final class MicRecorder: @unchecked Sendable {
             try attach(voiceProcessing: false)
         } catch {
             FileHandle.standardError.write(Data(
-                "mic raw fallback failed: \(error) — session continues without mic track\n".utf8
+                "mic raw fallback failed: \(error). Session continues without mic track\n".utf8
             ))
             file = nil
         }

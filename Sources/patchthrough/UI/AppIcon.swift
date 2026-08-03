@@ -6,7 +6,7 @@ import AppKit
 ///
 /// Geometry is the design system's Signal treatment (packaging/design):
 /// squircle at 22.4% corner radius filled #D2371B, the mark at 64% of the
-/// tile in Paper (#FFF9F4), heavy weight (2.1), flat — no bevel, no gradient.
+/// tile in Paper (#FFF9F4), heavy weight (2.1), and flat. No bevel, no gradient.
 enum AppIcon {
 
     static func apply() {
@@ -35,7 +35,7 @@ enum AppIcon {
             NSColor(srgbRed: 0xD2 / 255, green: 0x37 / 255, blue: 0x1B / 255, alpha: 1).setFill()
             NSBezierPath(roundedRect: plate, xRadius: radius, yRadius: radius).fill()
 
-            // Art: translate(184,184) scale(27.333) on the 24-grid — i.e. the
+            // Art: translate(184,184) scale(27.333) on the 24-grid, so the
             // mark occupies the central 64%. SVG y grows down, AppKit up, so
             // flip within the 24-unit box (art y = 24 − (y − 0.45)).
             let unit = 27.333 * s

@@ -2,7 +2,7 @@ import Foundation
 
 /// One meeting recording: a timestamped folder holding two independent tracks
 /// (mic = you, system = them) plus a meta.json written on clean stop. Tracks
-/// are separate on purpose — whisper does better on clean single-source audio,
+/// are separate on purpose. Whisper does better on clean single-source audio,
 /// and two tracks give free two-party diarization.
 final class RecordingSession {
     let dir: URL
@@ -44,9 +44,9 @@ final class RecordingSession {
         }
         // Write a provisional meta.json immediately. resumePending() keys on
         // meta.json existing, so without this an unclean exit (SIGKILL, panic,
-        // power loss) orphans the audio on disk forever — the tracks are there
-        // but nothing will ever pick them up. Overwritten on clean stop with
-        // real end time and offsets.
+        // power loss) orphans the audio on disk forever. The tracks are there,
+        // but nothing ever picks them up. A clean stop overwrites this file
+        // with the real end time and the offsets.
         writeMeta(ended: nil)
     }
 
