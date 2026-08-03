@@ -9,12 +9,19 @@ Milestone 1 is partly built. Be careful about what is verified here.
 
 | Part | State | Verified how |
 |---|---|---|
-| Session format: meta.json, transcript.md, handoff.md | done | 24 unit tests, and `verify-contract.sh` reads a generated session with the real npm CLI |
+| Session format: meta.json, transcript.md, handoff.md | done | 33 unit tests, and `verify-contract.sh` reads a generated session with the real npm CLI |
 | Silence padding arithmetic | done | unit tests, including a two-hour gap |
+| Transcript line breaks | done | unit tests against the rules in ParakeetEngine.swift |
 | Audio capture through WASAPI | written | **compiles only.** It has never run |
 | AAC encoding through Media Foundation | written | **compiles only.** It has never run |
-| Transcription | not started | the `ITranscriptionEngine` seam exists, with no engine behind it |
+| Parakeet through sherpa-onnx | written | **compiles only.** No model has been loaded, and no audio decoded |
+| Model download | not started | a missing model is an error that names the file and the source |
 | Tray application | not started | milestone 2 |
+
+The three rows that say "compiles only" are the whole risk. Compiling proves
+every API name and signature is right, which is worth having, and it proves
+nothing about behaviour. Nobody has confirmed that this code captures a sample,
+encodes a file, or loads a model.
 
 `Patchthrough.Core` targets `net8.0` and holds everything that does not need
 Windows, so the session format stays testable on any machine. That split is
@@ -38,12 +45,36 @@ dotnet test              # the session format and the padding arithmetic
 real `Patchthrough.Core` code path and hands it to `cli/bin/patchthrough.js`,
 which is the definition of done for milestone 1.
 
+## Use
+
+```
+Patchthrough rec [--out <dir>] [--name <title>]   record a meeting
+Patchthrough transcribe [--out <dir>]             transcribe what is pending
+Patchthrough doctor [--out <dir>]                 check this machine
+```
+
+`rec` records until Ctrl+C or Enter, then transcribes. A failed transcription
+leaves the audio and meta.json in place, so `transcribe` retries it.
+
+The models do not download themselves. Get
+`sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8` from the
+[sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases) and
+unpack it into `%LOCALAPPDATA%\patchthrough\models\parakeet-tdt-0.6b-v2-int8`.
+`doctor` names any file that is missing. An unattended fetch of 600 MB with no
+recorded checksum is worse than one clear instruction, so downloading waits for
+a milestone that can verify what it fetched.
+
 ## What is left in milestone 1
 
-1. Run the recorder on Windows. Confirm that both tracks capture, and that a
-   meeting with a long silence in the middle keeps its two tracks aligned.
-2. Add a transcription engine behind `ITranscriptionEngine`.
-3. Wire the pipeline into `Patchthrough rec`, so a session arrives transcribed.
+Every remaining item needs a Windows machine.
+
+1. Run `Patchthrough doctor`. It should find the devices and the model.
+2. Record a meeting. Confirm both tracks hold audio.
+3. Record three minutes and play audio only in the middle minute. Confirm the
+   two tracks stay aligned, which is what the silence padding exists for. This
+   is the failure most likely to survive into a release, because it produces a
+   plausible transcript with wrong times rather than an error.
+4. Confirm `patchthrough hand claude` on the same machine hands the session off.
 
 ## What a Windows recorder has to do
 
