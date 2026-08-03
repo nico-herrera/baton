@@ -135,6 +135,29 @@ test('a failed Windows file copy sends the handoff text and opens a plain chat',
   assert.equal(opened.options.env.PATCHTHROUGH_URL, 'https://claude.ai/new');
 });
 
+test('a destination from the config reaches the same Windows path', (t) => {
+  const dir = temporaryDirectory(t);
+  // A user-defined site can already carry a query string. The prompt has to
+  // join that query rather than replace it.
+  const targets = {
+    internal: {
+      label: 'Internal tool',
+      newChatURL: 'https://tool.example.com/chat?team=eng',
+      prefillsPrompt: true,
+      uploadsToCloud: false,
+      isCustom: true,
+    },
+  };
+  const spawn = fakeSpawn();
+
+  const result = handToWeb('internal', fakeSession(dir), { platform: 'win32', spawn, targets });
+  assert.equal(result.attached, true);
+  const opened = spawn.calls.find((call) => decodedScript(call).includes('Start-Process'));
+  const url = new URL(opened.options.env.PATCHTHROUGH_URL);
+  assert.equal(url.searchParams.get('team'), 'eng');
+  assert.match(url.searchParams.get('q'), /transcript of a meeting/);
+});
+
 test('a web handoff still refuses a platform with no system clipboard', (t) => {
   const dir = temporaryDirectory(t);
   const spawn = fakeSpawn();
