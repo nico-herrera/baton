@@ -2,6 +2,7 @@ import AppKit
 import ArgumentParser
 import CoreFoundation
 import Foundation
+import UserNotifications
 
 @main
 struct Patchthrough: ParsableCommand {
@@ -402,6 +403,15 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
 
         watchRecordingsRoot()
+
+        // notifyUser posts through UserNotifications when bundled. Ask once
+        // here, and take the click so it opens the window. The bare-binary
+        // path stays on osascript and needs neither.
+        if runsFromAppBundle {
+            let center = UNUserNotificationCenter.current()
+            center.delegate = self
+            center.requestAuthorization(options: [.alert]) { _, _ in }
+        }
     }
 
     /// Source builds before the standalone npm CLI created this symlink. Only
@@ -706,5 +716,31 @@ final class AppController: NSObject, NSApplicationDelegate {
         return h > 0
             ? String(format: "%d:%02d:%02d", h, m, s)
             : String(format: "%d:%02d", m, s)
+    }
+}
+
+extension AppController: UNUserNotificationCenterDelegate {
+    /// A click on any Patchthrough banner opens the window. Every
+    /// notification the app posts ("transcript ready", the failure cases)
+    /// resolves there.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        Task { @MainActor in
+            self.openWindow()
+        }
+        completionHandler()
+    }
+
+    /// Without this, macOS hides the banner while the app is frontmost. The
+    /// window can be frontmost when a queued transcription finishes.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner])
     }
 }
