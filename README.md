@@ -137,16 +137,24 @@ menu bar. Each app gets the best entry point that the app exposes:
 |---|---|
 | `copilot` | VS Code opens through `code chat` in agent mode, with the transcript attached as context |
 | `cursor` | Cursor opens the repository, and the prompt arrives through the `cursor://` deeplink (clipboard fallback) |
-| `claude` | The Claude app opens **with the transcript file attached**, because it accepts any file as a document. Instructions go to the clipboard |
-| `claude-cowork` | Claude opens the **whole session folder** as a workspace, including audio, timing, and transcript |
-| `codex` | The ChatGPT app opens. The prompt and the full transcript go to the clipboard as one paste |
+| `claude` | The Claude app opens a **new chat** through its `claude://` deeplink, instructions prefilled. The handoff file goes to the clipboard, and the paste attaches it |
+| `claude-code` | The Claude app opens a **new Claude Code session** in the repo you pick. The transcript stages at `.meeting/<session>.md` (kept out of commits), and the prompt points at it. No clipboard involved |
+| `codex` | The ChatGPT app opens. The handoff file goes to the clipboard, and the paste attaches it |
 | `kimi` | The Kimi app opens with the same clipboard payload |
+| `m365-copilot` | The Microsoft 365 Copilot app opens with the prompt and transcript on the clipboard as **text**. Its composer ignores file pastes and synthesized keystrokes, so paste (⌘V) yourself |
 
-Some apps expose no prompt API. For those apps, the clipboard payload is
-self-contained: instructions first, then the verbatim transcript. Add
-`"auto_paste": true` to the config, and Patchthrough completes the paste for you. It
-synthesizes ⌘N and ⌘V after the app opens. macOS asks for Accessibility permission
-once, and you still press send.
+The Claude CLI is a separate destination. It is `claude` **without** `--gui`, and the
+menu calls it **Claude Code**.
+
+ChatGPT and Kimi expose no prompt API, and the Claude chat composer only takes text.
+For those, the clipboard carries the `handoff.md` file itself, so the paste attaches
+it like a drag would. The file is self-contained: instructions first, then the
+verbatim transcript. An attachment scales to any meeting length, where inline text
+would drown the input box. Patchthrough completes the paste for you: it synthesizes
+⌘N and ⌘V after the app opens (⌘V only for Claude, whose deeplink already opened the
+new chat), and you still press send. macOS asks for Accessibility permission once.
+Without that permission, Patchthrough tells you to paste yourself. To always paste
+manually, add `"auto_paste": false` to the config.
 
 The Patchthrough window is the universal entry point. Open it from the menu bar. Every
 session in the window has a **drag chip**. Drag the transcript file into any chat

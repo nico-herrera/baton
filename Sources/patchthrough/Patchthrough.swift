@@ -108,6 +108,28 @@ struct Hand: ParsableCommand {
             }
             Handoff.launchGui(target: target, session: sess, repo: repo)
             FileHandle.standardError.write(Data("→ \(target.label)\n".utf8))
+            let paste: (app: String, newChat: Bool)?
+            switch target.kind {
+            case .appClipboard(let appName): paste = (appName, true)
+            case .claudeChat: paste = ("Claude", false)
+            default: paste = nil
+            }
+            if let paste {
+                if !Config.autoPaste() || target.manualTextPaste {
+                    FileHandle.standardError.write(Data(target.manualTextPaste
+                        ? "prompt + transcript are on your clipboard. Paste (⌘V) into the chat\n".utf8
+                        : "the handoff file is on your clipboard. Paste (⌘V) into a new chat to attach it\n".utf8
+                    ))
+                } else if !Handoff.autoPaste(app: paste.app, newChat: paste.newChat) {
+                    FileHandle.standardError.write(Data("""
+                    couldn't paste into \(paste.app). The handoff file is on your clipboard: \
+                    press \(paste.newChat ? "⌘N then ⌘V" : "⌘V").
+                    Grant Accessibility to patchthrough in System Settings → Privacy & Security to \
+                    paste automatically.
+
+                    """.utf8))
+                }
+            }
             return
         }
 
@@ -478,25 +500,37 @@ final class AppController: NSObject, NSApplicationDelegate {
         if isGui {
             guard let target = Handoff.installedGuiTargets().first(where: { $0.id == name }) else { return }
             if !target.needsRepo {
+                // Targets that accept no automation get an explainer first,
+                // so the one manual step is clear before the app takes focus.
+                if case .appClipboard(let appName) = target.kind, target.manualTextPaste,
+                   !HandoffAlert.confirmManualPaste(app: appName) {
+                    return
+                }
                 Handoff.launchGui(target: target, session: session, repo: nil)
                 switch target.kind {
                 case .appClipboard(let appName):
-                    notifyUser(
-                        title: "Patchthrough: handed to \(appName)",
-                        body: Config.autoPaste()
-                            ? "Pasting into a new chat…"
-                            : "Prompt + transcript are on your clipboard. Paste (⌘V) into a new chat."
-                    )
-                case .fileOpen(let appName):
-                    notifyUser(
-                        title: "Patchthrough: handed to \(appName)",
-                        body: "Transcript attached. Instructions are on your clipboard. Paste (⌘V) and send."
-                    )
-                case .folderOpen(let appName):
-                    notifyUser(
-                        title: "Patchthrough: session folder → \(appName)",
-                        body: "Instructions are on your clipboard. Paste (⌘V) once the workspace opens."
-                    )
+                    // With auto-paste on, the paste landing in the app is the
+                    // feedback. A notification on top of it is noise, and
+                    // macOS drops it for an accessory app anyway.
+                    if Config.autoPaste() && !target.manualTextPaste {
+                        finishPaste(app: appName, newChat: true)
+                    } else {
+                        notifyUser(
+                            title: "Patchthrough: handed to \(appName)",
+                            body: target.manualTextPaste
+                                ? "Prompt + transcript are on your clipboard. Paste (⌘V) into the chat."
+                                : "The handoff file is on your clipboard. Paste (⌘V) into a new chat to attach it."
+                        )
+                    }
+                case .claudeChat:
+                    if Config.autoPaste() {
+                        finishPaste(app: "Claude", newChat: false)
+                    } else {
+                        notifyUser(
+                            title: "Patchthrough: handed to Claude",
+                            body: "New chat opened. Paste (⌘V) to attach the transcript."
+                        )
+                    }
                 default: break
                 }
                 DestinationRanking.record(choice)
@@ -528,6 +562,17 @@ final class AppController: NSObject, NSApplicationDelegate {
         )
         DestinationRanking.record(choice)
         refreshHandoffMenu()
+    }
+
+    /// The paste script sleeps about two seconds while the app comes up, so it
+    /// runs off the main actor. Otherwise the menu-bar app stops responding
+    /// for the duration of every clipboard handoff.
+    private func finishPaste(app: String, newChat: Bool) {
+        Task {
+            let pasted = await Task.detached { Handoff.autoPaste(app: app, newChat: newChat) }.value
+            guard !pasted else { return }
+            HandoffAlert.showPasteFailed(app: app)
+        }
     }
 
     private func pickRepo(session: String, destination: String) -> URL? {

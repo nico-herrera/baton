@@ -58,11 +58,13 @@ enum Config {
     }
 
     /// After a clipboard handoff to a chat app, synthesize ⌘N+⌘V so the paste
-    /// happens without a hand touching the keyboard. Off by default: it
-    /// requires an Accessibility grant and injects keystrokes, which is the
-    /// kind of thing that should be a deliberate opt-in.
+    /// happens without a hand touching the keyboard. On by default: without
+    /// it, opening an app that is already open looks like nothing happened.
+    /// The first paste asks for Accessibility, and patchthrough explains the
+    /// manual fallback when the grant is missing. Set `"auto_paste": false`
+    /// to keep the paste manual.
     static func autoPaste() -> Bool {
-        load()?["auto_paste"] as? Bool ?? false
+        load()?["auto_paste"] as? Bool ?? true
     }
 
     /// Whether transcription runs at all.

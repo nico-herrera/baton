@@ -66,8 +66,7 @@ final class SessionStore: ObservableObject {
         /// The menu keeps meaningful product context ("Copilot (VS Code)") but
         /// drops launch-mechanism notes that are not destination names.
         var menuLabel: String {
-            for suffix in [" (attach transcript)", " (session folder)", " (ChatGPT app)"]
-            where label.hasSuffix(suffix) {
+            for suffix in [" (ChatGPT app)"] where label.hasSuffix(suffix) {
                 return String(label.dropLast(suffix.count))
             }
             return label
@@ -137,7 +136,7 @@ final class SessionStore: ObservableObject {
         // (swift/PatchThroughButton.swift). Per-agent SF Symbols read as noise
         // next to section headers that already say Terminal and App.
         let terminal = Handoff.installedAgents().map {
-            Destination(id: "cli:\($0.agent.name)", label: $0.agent.name,
+            Destination(id: "cli:\($0.agent.name)", label: $0.agent.displayName,
                         symbol: "terminal", isTerminal: true, needsRepo: true)
         }
         let gui = Handoff.installedGuiTargets().map { t in
@@ -271,21 +270,56 @@ final class SessionStore: ObservableObject {
         } else {
             let id = String(dest.id.dropFirst(4))
             guard let target = Handoff.installedGuiTargets().first(where: { $0.id == id }) else { return }
+            // Targets that accept no automation get an explainer first, so
+            // the one manual step is clear before the app takes focus.
+            if case .appClipboard(let appName) = target.kind, target.manualTextPaste,
+               !HandoffAlert.confirmManualPaste(app: appName) {
+                lastAction = "handoff to \(dest.shortLabel) cancelled"
+                return
+            }
             Handoff.launchGui(target: target, session: sess, repo: repo)
             switch target.kind {
-            case .appClipboard:
-                lastAction = Config.autoPaste()
-                    ? "\(dest.shortLabel) opened. Pasting into a new chat…"
-                    : "\(dest.shortLabel) opened. Prompt and transcript are on your clipboard (⌘V)"
-            case .fileOpen:
-                lastAction = "\(dest.shortLabel) opened with the transcript attached (⌘V for instructions)"
-            case .folderOpen:
-                lastAction = "session folder opened in \(dest.shortLabel) (⌘V for instructions)"
+            case .appClipboard(let appName):
+                if Config.autoPaste() && !target.manualTextPaste {
+                    lastAction = "\(dest.shortLabel) opened. Attaching the transcript to a new chat…"
+                    finishPaste(app: appName, label: dest.shortLabel, newChat: true)
+                } else if target.manualTextPaste {
+                    lastAction = "\(dest.shortLabel) opened. Prompt and transcript are on your clipboard (⌘V)"
+                } else {
+                    lastAction = "\(dest.shortLabel) opened. The handoff file is on your clipboard (⌘V attaches it)"
+                }
+            case .claudeChat:
+                if Config.autoPaste() {
+                    lastAction = "Claude opened a new chat. Attaching the transcript…"
+                    finishPaste(app: "Claude", label: dest.shortLabel, newChat: false)
+                } else {
+                    lastAction = "Claude opened a new chat. The handoff file is on your clipboard (⌘V attaches it)"
+                }
+            case .claudeCode:
+                lastAction = "new Claude Code session in \(repo?.lastPathComponent ?? "?") (transcript staged)"
             default:
                 lastAction = "patched through to \(dest.shortLabel) in \(repo?.lastPathComponent ?? "?")"
             }
         }
         DestinationRanking.record(dest.id)
+        lastDestinationID = dest.id
+    }
+
+    /// The paste script sleeps about two seconds while the app comes up, so it
+    /// runs off the main actor. Otherwise every clipboard handoff freezes the
+    /// window for the duration.
+    private func finishPaste(app: String, label: String, newChat: Bool) {
+        Task {
+            let pasted = await Task.detached { Handoff.autoPaste(app: app, newChat: newChat) }.value
+            guard !pasted else { return }
+            lastAction = "\(label) opened. The handoff file is on your clipboard (⌘V attaches it)"
+            HandoffAlert.showPasteFailed(app: app)
+        }
+    }
+
+    /// Point the split button at a destination without sending anything.
+    /// The window menu calls this: rows select, the Signal button fires.
+    func choose(_ dest: Destination) {
         lastDestinationID = dest.id
     }
 
@@ -333,7 +367,11 @@ struct PatchthroughRootView: View {
     /// to be wired up by hand too. `.searchable` used to supply ⌘F.
     @FocusState private var searchFocused: Bool
     @State private var showDestinationMenu = false
-    @State private var hoveredDestination: String?
+    /// The hover/keyboard highlight in the destination menu. It persists when
+    /// the pointer leaves a row: falling back to the default highlight made
+    /// the selection bounce on every gap the pointer crossed.
+    @State private var highlightedDestination: String?
+    @FocusState private var destinationMenuFocused: Bool
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -486,7 +524,7 @@ struct PatchthroughRootView: View {
 
             Button {
                 showDestinationMenu.toggle()
-                hoveredDestination = nil
+                highlightedDestination = showDestinationMenu ? store.topDestination?.id : nil
             } label: {
                 Image(systemName: "chevron.down")
                     .font(PT.F.chevron)
@@ -515,31 +553,37 @@ struct PatchthroughRootView: View {
         .disabled(!ready)
     }
 
-    private var destinationMenuPanel: some View {
+    /// Menu order: three most-used, then terminals, then apps. Keyboard
+    /// navigation walks the same flattened order the rows render in.
+    private var menuSections: (top: [SessionStore.Destination],
+                               terminal: [SessionStore.Destination],
+                               app: [SessionStore.Destination]) {
         let ranked = store.rankedDestinations
-        let counts = DestinationRanking.counts()
-        let top3 = Array(ranked.prefix(3))
         let rest = Array(ranked.dropFirst(3))
-        let terminals = rest.filter(\.isTerminal)
-        let apps = rest.filter { !$0.isTerminal }
+        return (Array(ranked.prefix(3)), rest.filter(\.isTerminal), rest.filter { !$0.isTerminal })
+    }
+
+    private var destinationMenuPanel: some View {
+        let sections = menuSections
+        let counts = DestinationRanking.counts()
 
         return VStack(alignment: .leading, spacing: PT.M.menuGap) {
             menuSectionHeader("Most used")
-            ForEach(top3) { dest in
+            ForEach(sections.top) { dest in
                 destinationMenuRow(dest, count: counts[dest.id] ?? 0, isMostUsed: true)
             }
 
-            if !terminals.isEmpty {
+            if !sections.terminal.isEmpty {
                 menuDivider
                 menuSectionHeader("Terminal")
-                ForEach(terminals) { dest in
+                ForEach(sections.terminal) { dest in
                     destinationMenuRow(dest, count: 0, isMostUsed: false)
                 }
             }
 
-            if !apps.isEmpty {
+            if !sections.app.isEmpty {
                 menuSectionHeader("App")
-                ForEach(apps) { dest in
+                ForEach(sections.app) { dest in
                     destinationMenuRow(dest, count: 0, isMostUsed: false)
                 }
             }
@@ -555,8 +599,37 @@ struct PatchthroughRootView: View {
                 radius: PT.M.menuShadowRadius,
                 x: 0,
                 y: PT.M.menuShadowY)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($destinationMenuFocused)
+        .onAppear { destinationMenuFocused = true }
+        .onKeyPress(.downArrow) { moveHighlight(1); return .handled }
+        .onKeyPress(.upArrow) { moveHighlight(-1); return .handled }
+        .onKeyPress(.return) { commitHighlight(); return .handled }
+        .onKeyPress(.escape) { closeDestinationMenu(); return .handled }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Patch through destinations")
+    }
+
+    private func moveHighlight(_ delta: Int) {
+        let sections = menuSections
+        let items = sections.top + sections.terminal + sections.app
+        guard !items.isEmpty else { return }
+        guard let current = items.firstIndex(where: { $0.id == highlightedDestination }) else {
+            highlightedDestination = (delta > 0 ? items.first : items.last)?.id
+            return
+        }
+        highlightedDestination = items[(current + delta + items.count) % items.count].id
+    }
+
+    /// Return picks the highlighted destination, exactly like a click: the
+    /// menu only selects. The Signal half of the split button sends.
+    private func commitHighlight() {
+        if let id = highlightedDestination,
+           let dest = store.destinations.first(where: { $0.id == id }) {
+            store.choose(dest)
+        }
+        closeDestinationMenu()
     }
 
     private func menuSectionHeader(_ title: String) -> some View {
@@ -581,10 +654,13 @@ struct PatchthroughRootView: View {
     private func destinationMenuRow(_ dest: SessionStore.Destination,
                                     count: Int,
                                     isMostUsed: Bool) -> some View {
-        let isActive = (hoveredDestination ?? store.topDestination?.id) == dest.id
+        let isActive = highlightedDestination == dest.id
+        // A row click selects the destination as the split button's primary
+        // action; it never sends. Sending stays behind the explicit click on
+        // the Signal half, so browsing the menu can't launch anything.
         return Button {
+            store.choose(dest)
             closeDestinationMenu()
-            if let item = store.selected { store.send(item, to: dest) }
         } label: {
             HStack(spacing: PT.M.menuRowGap) {
                 Image(systemName: dest.symbol)
@@ -616,11 +692,7 @@ struct PatchthroughRootView: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering in
-            if isHovering {
-                hoveredDestination = dest.id
-            } else if hoveredDestination == dest.id {
-                hoveredDestination = nil
-            }
+            if isHovering { highlightedDestination = dest.id }
         }
         .accessibilityLabel(dest.menuLabel)
         .accessibilityValue(count > 0 ? "Used \(count) times" : "")
@@ -628,7 +700,7 @@ struct PatchthroughRootView: View {
 
     private func closeDestinationMenu() {
         showDestinationMenu = false
-        hoveredDestination = nil
+        highlightedDestination = nil
     }
 
     // MARK: Sidebar: time and first transcript line.
@@ -1228,9 +1300,39 @@ struct SettingsView: View {
             // and the switch stops being right-aligned.
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .toggleStyle(.switch)
+        .toggleStyle(PTSwitchStyle())
         .padding(.horizontal, 13)
         .padding(.vertical, 11)
+    }
+
+    /// 10d's switch: a 38×22 Signal pill with an 18pt knob inset 2pt, muted
+    /// track and grey knob when off. The system switch has its own size and
+    /// its own greys, which is exactly the drift the mock calls out.
+    private struct PTSwitchStyle: ToggleStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            // Knob travel from center: half the track minus half the knob,
+            // minus the inset.
+            let travel = (PT.M.switchTrackWidth - PT.M.switchKnobSize) / 2 - PT.M.switchKnobInset
+            return Button {
+                configuration.isOn.toggle()
+            } label: {
+                HStack(spacing: 12) {
+                    configuration.label
+                    RoundedRectangle(cornerRadius: PT.M.switchTrackHeight / 2)
+                        .fill(configuration.isOn ? PT.C.signal : PT.C.switchOffTrack)
+                        .frame(width: PT.M.switchTrackWidth, height: PT.M.switchTrackHeight)
+                        .overlay {
+                            Circle()
+                                .fill(configuration.isOn ? PT.C.onSignal : PT.C.switchOffKnob)
+                                .frame(width: PT.M.switchKnobSize, height: PT.M.switchKnobSize)
+                                .offset(x: configuration.isOn ? travel : -travel)
+                        }
+                        .animation(.easeOut(duration: 0.15), value: configuration.isOn)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(configuration.isOn ? "on" : "off")
+        }
     }
 
     private func load() {
@@ -1264,7 +1366,7 @@ struct SettingsView: View {
                 "recordings_dir": (trimmedDir.isEmpty || trimmedDir == "~/Recordings") ? nil : trimmedDir,
                 "transcription.enabled": transcribe ? nil : false,
                 "mic_voice_processing": voiceProcessing ? true : nil,
-                "auto_paste": autoPaste ? true : nil,
+                "auto_paste": autoPaste ? nil : false,
                 "on_stop": trimmedHook.isEmpty ? nil : trimmedHook,
                 // Only written when it isn't the default, so the config keeps
                 // holding deliberate overrides only.
