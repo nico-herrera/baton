@@ -9,19 +9,21 @@ Milestone 1 is partly built. Be careful about what is verified here.
 
 | Part | State | Verified how |
 |---|---|---|
-| Session format: meta.json, transcript.md, handoff.md | done | 33 unit tests, and `verify-contract.sh` reads a generated session with the real npm CLI |
+| Session format: meta.json, transcript.raw.json, transcript.json, transcript.md, handoff.md | done | unit tests and `verify-contract.sh` read a generated session with the real npm CLI |
 | Silence padding arithmetic | done | unit tests, including a two-hour gap |
 | Transcript line breaks | done | unit tests against the rules in ParakeetEngine.swift |
 | Audio capture through WASAPI | written | **compiles only.** It has never run |
 | AAC encoding through Media Foundation | written | **compiles only.** It has never run |
-| Parakeet through sherpa-onnx | written | **compiles only.** No model has been loaded, and no audio decoded |
-| Model download | not started | a missing model is an error that names the file and the source |
+| Parakeet through sherpa-onnx | written | compiles and model-free tests pass; hardware/model smoke is scheduled/manual |
+| Whisper Large v3 Turbo Q5 through Whisper.net | written | compiles; probes Vulkan, CPU, then CPU-no-AVX; hardware/model smoke pending |
+| Model download | done in code | resumable and pinned SHA-256 verification; real Windows download/load pending |
 | Tray application | not started | milestone 2 |
 
-The three rows that say "compiles only" are the whole risk. Compiling proves
-every API name and signature is right, which is worth having, and it proves
-nothing about behaviour. Nobody has confirmed that this code captures a sample,
-encodes a file, or loads a model.
+The hardware rows remain the risk. A cross-compiled Windows binary and model-free
+tests prove APIs and contracts, not capture, codecs, GPU selection, or inference on a
+real Windows device. The integration PR stays draft until
+[`../docs/windows-hardware-acceptance.md`](../docs/windows-hardware-acceptance.md)
+is complete.
 
 `Patchthrough.Core` targets `net8.0` and holds everything that does not need
 Windows, so the session format stays testable on any machine. That split is
@@ -51,18 +53,17 @@ which is the definition of done for milestone 1.
 Patchthrough rec [--out <dir>] [--name <title>]   record a meeting
 Patchthrough transcribe [--out <dir>]             transcribe what is pending
 Patchthrough doctor [--out <dir>]                 check this machine
+Patchthrough benchmark --audio <file> --engine parakeet|whisper
 ```
 
 `rec` records until Ctrl+C or Enter, then transcribes. A failed transcription
 leaves the audio and meta.json in place, so `transcribe` retries it.
 
-The models do not download themselves. Get
-`sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8` from the
-[sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases) and
-unpack it into `%LOCALAPPDATA%\patchthrough\models\parakeet-tdt-0.6b-v2-int8`.
-`doctor` names any file that is missing. An unattended fetch of 600 MB with no
-recorded checksum is worse than one clear instruction, so downloading waits for
-a milestone that can verify what it fetched.
+The explicitly selected model downloads on first use into
+`%LOCALAPPDATA%\patchthrough\models`. Partial files resume. Patchthrough checks the
+registered byte length and SHA-256 before installing/loading, securely extracts the
+Parakeet archive, and revalidates installed files on later launches. `doctor` reports
+what will download without treating a not-yet-cached model as a broken machine.
 
 ## What is left in milestone 1
 

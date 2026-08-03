@@ -27,9 +27,11 @@ handoff is the product. One click takes you from *"we agreed on it in the meetin
    Two tracks are deliberate. Speech models work better on clean single-source audio.
    The two tracks also give you two-party diarization, `me` against `them`, with no
    speaker-identification model.
-2. **Click Stop.** Transcription starts automatically. It uses Parakeet TDT 0.6B
-   through [FluidAudio](https://github.com/FluidInference/FluidAudio) and Core ML.
-   Expect roughly 20 seconds of processing for each hour of audio on Apple Silicon.
+2. **Click Stop.** Transcription starts automatically and stays on-device. Standard
+   mode uses the best corpus-qualified engine for the machine. Max Accuracy may run
+   two complementary engines sequentially, but only after the checked-in release
+   gates prove at least a 10% WER gain over the best single engine. The safe default
+   remains Parakeet until that evidence exists.
 3. **In the menu bar, click Patch through to, then click claude.** The menu lists every
    agent that Patchthrough finds on your machine. Select the project folder. A terminal
    opens in that folder with the agent running and the transcript staged. You can also
@@ -55,12 +57,13 @@ Patchthrough ships two programs. They share one file format and nothing else.
 
 | | macOS | Windows | Linux |
 |---|---|---|---|
-| Record and transcribe (the app) | yes, macOS 15+, Apple Silicon | no, planned | no |
+| Record and transcribe | yes, macOS 15+, Apple Silicon | milestone 1 console recorder; hardware acceptance pending | no |
 | Hand a transcript to an agent (the CLI) | yes | yes | yes |
 | Hand a transcript to a chat site (the CLI) | yes | yes | no |
 
-The recorder is macOS only today. The CLI runs anywhere Node.js runs, and it reads any
-session that follows the
+The macOS recorder is released today. The Windows recorder is implemented on the
+integration branch but remains a draft until its hardware checklist passes. The CLI
+runs anywhere Node.js runs, and it reads any session that follows the
 [session v1 contract](schemas/session-v1.md). A recorder for another platform therefore
 needs no change to the CLI.
 
@@ -126,25 +129,30 @@ CLI documentation. If you upgrade from npm package 1.x, your installed app and y
 recordings stay in place. The upgrade only replaces the old wrapper command with the
 new CLI.
 
-Sessions land in `~/Recordings/<yyyy.MM.dd-HHmm>/`. Each session holds the two audio
-tracks, `meta.json`, `transcript.json` with timed and speaker-tagged segments, and
-`transcript.md`.
+Sessions land in `~/Recordings/<yyyy.MM.dd-HHmm>/`. Each session holds the original
+two audio tracks, `meta.json`, `transcript.raw.json` with every recoverable engine
+hypothesis and timed word, additive `transcript.json`, and readable `transcript.md`.
 
 Optional config at `~/.config/patchthrough/config.json`:
 
 ```json
 {
   "recordings_dir": "~/Recordings",
-  "transcription": { "enabled": true, "engine": "parakeet",
+  "transcription": { "enabled": true, "engine": "auto",
+                     "quality_mode": "standard",
+                     "project_dir": "~/Developer/my-project",
                      "dedup_mic_echo": true },
   "mic_voice_processing": false,
   "on_stop": "my-hook"
 }
 ```
 
-`dedup_mic_echo` drops microphone segments that repeat the system track. Speakers feed
-speech back into the mic, so without it the other person also appears as `me`. Set it to
-`false` to keep every raw segment.
+`quality_mode` is `standard` or `max_accuracy`. Both obey the model and processing
+budgets in [`quality/README.md`](quality/README.md). `project_dir` supplies bounded
+spellings from glossaries and project metadata; terms are recorded as applied only
+when acoustic confidence supports them. `dedup_mic_echo` removes mic speech only when
+at least 80% of timed words match a nearby, higher-confidence system track. Set it to
+`false` to keep every canonical segment; raw hypotheses are always retained.
 
 `on_stop` runs any command and passes the finished session directory as the argument.
 Use it for summarization, filing, indexing, or any other step that follows the
@@ -242,14 +250,15 @@ posture is therefore deliberate:
 - **Everything on-device.** Audio, transcripts, and the handoff never touch a network.
   The only downloads are the transcription models. FluidAudio fetches them once from
   HuggingFace.
-- **Exact dependency pins.** Patchthrough has two dependencies,
-  swift-argument-parser and FluidAudio, and pins both with `.exact()`. No version range
+- **Exact dependency pins.** Patchthrough pins swift-argument-parser, FluidAudio, and
+  WhisperKit with `.exact()`. No version range
   can pull unreviewed code into a binary that has microphone access.
 - **Reviewed baselines.** `packaging/verify-deps.sh` fails the build in three cases:
   the resolved dependencies drift from the committed baseline, the compiled checkout
   does not match the lockfile, or a dependency checkout has local modifications.
-  `packaging/verify-models.sh` does the same for the downloaded model files. Core ML
-  executes those files, and nothing else covers them.
+  Runtime SHA-256 verification covers every downloaded Core ML artifact before load;
+  Windows verifies pinned archives/models and checks an extracted-file manifest before
+  inference. `models/registry.json` is the reviewed source, version, size, and hash list.
 - **No npm install scripts.** The npm package is plain JavaScript. It never downloads
   or executes a native binary during installation.
 - **Documented handoff contract.** The app and the CLI communicate through the
