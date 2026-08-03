@@ -97,8 +97,8 @@ patchthrough hand codex --file meeting.md
 patchthrough hand --web claude      # open a chat site, transcript on the clipboard
 ```
 
-`--web claude`, `--web chatgpt` and `--web m365` need macOS, because they use the macOS
-clipboard. They need no repository and no installed app. One paste (⌘V) attaches the
+`--web claude`, `--web chatgpt`, `--web m365`, and any id from `custom_destinations` need
+macOS, because they use the macOS clipboard. They need no repository and no installed app. One paste (⌘V) attaches the
 transcript. The CLI cannot paste for you as reliably as the app can: macOS gives
 Accessibility to the terminal that runs the command, not to Patchthrough, so without
 that grant the CLI tells you to paste instead of pretending it did.
@@ -152,6 +152,27 @@ menu bar. Each app gets the best entry point that the app exposes:
 | `web-claude` | claude.ai opens a new chat in your browser with the prompt prefilled. The paste attaches the transcript |
 | `web-chatgpt` | chatgpt.com opens the same way |
 | `web-m365` | m365.cloud.microsoft opens a new chat. This is the only way to attach a file to M365 Copilot, because the desktop app drops one. **Microsoft copies the attachment to your work OneDrive**, so Patchthrough asks first |
+
+**Your own destinations.** Any web app with a chat box that accepts a pasted file can be
+a destination. Add it to `custom_destinations` in the config and it appears under
+**Custom**, on your machine only:
+
+```json
+{
+  "custom_destinations": [
+    { "id": "internal-tool", "label": "Internal tool",
+      "url": "https://tool.example.com/chat",
+      "prefills_prompt": true, "uploads_to_cloud": false }
+  ]
+}
+```
+
+`id` accepts letters, numbers, and `. _ -`. `url` must start with `http://` or
+`https://`: the URL goes to `open`, which hands any other scheme to whatever app claims
+it. Set `prefills_prompt` to false for a site that ignores a `q` query item, and
+`uploads_to_cloud` to true for one that copies attachments off your machine, which makes
+Patchthrough ask before each handoff. Patchthrough reports and skips an entry it cannot
+use. The npm CLI reads the same list: `patchthrough hand --web internal-tool`.
 
 **Web destinations** need no installed app, only a browser. They put `handoff.md` on the
 clipboard as a file, open the site, and one paste attaches it. Patchthrough pastes into

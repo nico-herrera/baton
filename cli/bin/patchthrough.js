@@ -5,7 +5,6 @@ const fs = require('fs');
 const path = require('path');
 const {
   KNOWN_AGENTS,
-  WEB_TARGETS,
   handToWeb,
   installedAgents,
   launchAgent,
@@ -16,6 +15,7 @@ const {
   resolveSession,
   stageSession,
   webPrompt,
+  webTargets,
   writeHandoffFile,
 } = require('../src/patchthrough');
 const packageJson = require('../package.json');
@@ -42,7 +42,7 @@ Agents:
   ${Object.keys(KNOWN_AGENTS).join(', ')}
 
 Web sites (macOS only, with --web):
-  ${Object.keys(WEB_TARGETS).join(', ')}
+  ${Object.keys(webTargets()).join(', ')}
 
 A web handoff puts handoff.md on the clipboard as a file and opens the site.
 One paste (⌘V) attaches the transcript.
@@ -156,7 +156,7 @@ function main() {
   if (!agent && !options.web && !options.noLaunch) {
     printAgents();
     console.log('\nusage: patchthrough hand <agent> [options]');
-    console.log(`       patchthrough hand --web <${Object.keys(WEB_TARGETS).join('|')}>`);
+    console.log(`       patchthrough hand --web <${Object.keys(webTargets()).join('|')}>`);
     return 0;
   }
   if (agent && !KNOWN_AGENTS[agent]) {
@@ -170,9 +170,10 @@ function main() {
   // A web handoff needs no repository: the transcript rides on the clipboard
   // as a file, and handoff.md carries the instructions.
   if (options.web) {
-    const site = WEB_TARGETS[options.web];
+    const targets = webTargets();
+    const site = targets[options.web];
     if (!site) {
-      throw new Error(`unknown web target '${options.web}'; expected ${Object.keys(WEB_TARGETS).join(', ')}`);
+      throw new Error(`unknown web target '${options.web}'; expected ${Object.keys(targets).join(', ')}`);
     }
     if (site.uploadsToCloud) {
       process.stderr.write(
@@ -185,7 +186,7 @@ function main() {
       console.log(`\n${webPrompt(session)}`);
       return 0;
     }
-    const result = handToWeb(options.web, session);
+    const result = handToWeb(site, session, { targets });
     process.stderr.write(`→ ${site.label}\n`);
     if (!result.attached) {
       process.stderr.write(`could not put ${result.file} on the clipboard. Drag it into the page instead\n`);

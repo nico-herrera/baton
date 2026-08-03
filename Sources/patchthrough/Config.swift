@@ -6,7 +6,12 @@ import Foundation
 ///       "recordings_dir": "~/Recordings",
 ///       "transcription": { "enabled": true, "engine": "parakeet" },
 ///       "mic_voice_processing": true,
-///       "on_stop": "my-hook"
+///       "on_stop": "my-hook",
+///       "custom_destinations": [
+///         { "id": "nucleus", "label": "Nucleus",
+///           "url": "https://nucleus.example.com/chat",
+///           "prefills_prompt": true, "uploads_to_cloud": false }
+///       ]
 ///     }
 ///
 /// Resolution order for the recordings root: --out flag > config file >
@@ -78,6 +83,65 @@ enum Config {
     static func terminal() -> String? {
         guard let id = load()?["terminal"] as? String, !id.isEmpty else { return nil }
         return id
+    }
+
+    /// A chat destination the user defined for themselves. These never ship:
+    /// an internal tool belongs in one person's config file, not in a public
+    /// build's menu.
+    struct CustomDestination {
+        let id: String
+        let label: String
+        let url: URL
+        let prefillsPrompt: Bool
+        let uploadsToCloud: Bool
+    }
+
+    /// Destinations from the `custom_destinations` array:
+    ///
+    ///     "custom_destinations": [
+    ///       { "id": "nucleus", "label": "Nucleus",
+    ///         "url": "https://nucleus.example.com/chat",
+    ///         "prefills_prompt": true, "uploads_to_cloud": false }
+    ///     ]
+    ///
+    /// Validation happens here rather than at launch, because the URL reaches
+    /// `/usr/bin/open`, which hands any scheme to whatever app claims it. A
+    /// `file://` or third-party scheme in a config file would otherwise become
+    /// an app invocation with values this code never checked. A rejected entry
+    /// is reported and skipped; one bad row must not cost the others.
+    static func customDestinations() -> [CustomDestination] {
+        guard let rows = load()?["custom_destinations"] as? [[String: Any]] else { return [] }
+
+        return rows.compactMap { row in
+            func reject(_ reason: String) -> CustomDestination? {
+                FileHandle.standardError.write(Data(
+                    "warning: ignoring a custom_destinations entry: \(reason)\n".utf8
+                ))
+                return nil
+            }
+
+            guard let id = row["id"] as? String, !id.isEmpty else {
+                return reject("no \"id\"")
+            }
+            // The id becomes a UserDefaults ranking key and a CLI argument.
+            guard id.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "._-".contains($0)) }) else {
+                return reject("id \"\(id)\" has characters outside A-Z a-z 0-9 . _ -")
+            }
+            guard let urlString = row["url"] as? String,
+                  let url = URL(string: urlString),
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https"
+            else {
+                return reject("\"\(id)\" needs a \"url\" that starts with http:// or https://")
+            }
+            return CustomDestination(
+                id: id,
+                label: (row["label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? id,
+                url: url,
+                prefillsPrompt: row["prefills_prompt"] as? Bool ?? true,
+                uploadsToCloud: row["uploads_to_cloud"] as? Bool ?? false
+            )
+        }
     }
 
     // MARK: - Writing

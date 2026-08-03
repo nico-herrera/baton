@@ -57,10 +57,13 @@ final class SessionStore: ObservableObject {
     /// Menu grouping. Terminal agents own a TTY, apps need an install, and web
     /// doors need neither. The three read differently to a user choosing where
     /// a meeting goes, so they get their own sections.
-    enum Category: String {
+    enum Category: String, CaseIterable {
         case terminal = "Terminal"
         case app = "App"
         case web = "Web"
+        /// Destinations from the user's own config. Last, and absent entirely
+        /// on an install that configured none.
+        case custom = "Custom"
     }
 
     struct Destination: Identifiable {
@@ -84,6 +87,7 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    @Published private(set) var destinations: [Destination] = []
     @Published var items: [Item] = []
     @Published var selection: String?
     @Published var isRecording = false
@@ -141,7 +145,11 @@ final class SessionStore: ObservableObject {
         return buckets.map { (title: $0.0, items: $0.1) }
     }
 
-    var destinations: [Destination] {
+    /// Resolving a destination probes the filesystem for every agent and reads
+    /// the config file, so this is computed once per `refresh()` rather than on
+    /// every menu render. A config edit therefore lands on the next refresh,
+    /// not instantly.
+    private func resolveDestinations() -> [Destination] {
         // One glyph per kind, not per agent: the design's menu uses the mock's
         // `#i-term` for every CLI row and `#i-app` for every GUI row
         // (swift/PatchThroughButton.swift). Per-agent SF Symbols read as noise
@@ -151,11 +159,12 @@ final class SessionStore: ObservableObject {
                         symbol: "terminal", category: .terminal, needsRepo: true)
         }
         let gui = Handoff.installedGuiTargets().map { t in
-            let isWeb: Bool
-            if case .webChat = t.kind { isWeb = true } else { isWeb = false }
+            var isWeb = false
+            if case .webChat = t.kind { isWeb = true }
+            let category: Category = t.isCustom ? .custom : (isWeb ? .web : .app)
             return Destination(id: "gui:\(t.id)", label: t.label,
                                symbol: isWeb ? "globe" : "app",
-                               category: isWeb ? .web : .app, needsRepo: t.needsRepo)
+                               category: category, needsRepo: t.needsRepo)
         }
         return terminal + gui
     }
@@ -188,6 +197,7 @@ final class SessionStore: ObservableObject {
     }()
 
     func refresh() {
+        destinations = resolveDestinations()
         let fm = FileManager.default
         let dirs = ((try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? [])
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
@@ -298,7 +308,10 @@ final class SessionStore: ObservableObject {
                 lastAction = "handoff to \(dest.shortLabel) cancelled"
                 return
             }
-            Handoff.launchGui(target: target, session: sess, repo: repo)
+            guard Handoff.launchGui(target: target, session: sess, repo: repo) else {
+                lastAction = "couldn't open \(dest.shortLabel)"
+                return
+            }
             switch target.kind {
             case .appClipboard(let appName):
                 if Config.autoPaste() && !target.manualTextPaste {
@@ -592,7 +605,7 @@ struct PatchthroughRootView: View {
         let ranked = store.rankedDestinations
         let rest = Array(ranked.dropFirst(3))
         let grouped: [(SessionStore.Category, [SessionStore.Destination])] =
-            [.terminal, .app, .web].map { category in
+            SessionStore.Category.allCases.map { category in
                 (category, rest.filter { $0.category == category })
             }
         return (Array(ranked.prefix(3)), grouped.filter { !$0.1.isEmpty })
