@@ -118,11 +118,16 @@ Optional config at `~/.config/patchthrough/config.json`:
 ```json
 {
   "recordings_dir": "~/Recordings",
-  "transcription": { "enabled": true, "engine": "parakeet" },
+  "transcription": { "enabled": true, "engine": "parakeet",
+                     "dedup_mic_echo": true },
   "mic_voice_processing": false,
   "on_stop": "my-hook"
 }
 ```
+
+`dedup_mic_echo` drops microphone segments that repeat the system track. Speakers feed
+speech back into the mic, so without it the other person also appears as `me`. Set it to
+`false` to keep every raw segment.
 
 `on_stop` runs any command and passes the finished session directory as the argument.
 Use it for summarization, filing, indexing, or any other step that follows the
@@ -246,6 +251,9 @@ posture is therefore deliberate:
 - Parakeet transcribes English only.
 - Expect transcription errors on proper nouns and identifiers. The handoff prompt warns
   the agent about exactly this.
+- Use headphones for the best speaker labels. On speakers, your mic also hears the other
+  person. Patchthrough removes the duplicated text, but speech it caught only through
+  the mic still carries the `me` label.
 
 ## Releases
 
