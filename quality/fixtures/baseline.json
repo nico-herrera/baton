@@ -1,0 +1,10 @@
+{
+  "run_version": 1,
+  "platform": "macos",
+  "quality_mode": "standard",
+  "models": ["parakeet-tdt-0.6b-v2-coreml"],
+  "items": [
+    { "id": "technical", "text": "Deploy patch through version to at three pee em", "processing_ms": 1000, "applied_vocabulary": [] },
+    { "id": "silence", "text": "phantom", "processing_ms": 1000, "applied_vocabulary": [] }
+  ]
+}

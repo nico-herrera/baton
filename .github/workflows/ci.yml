@@ -18,6 +18,8 @@ jobs:
           node-version: 22
       - name: Verify shared contracts
         run: node tools/verify-contracts.mjs
+      - name: Exercise release-gate scorer
+        run: node quality/score.mjs --manifest quality/fixtures/corpus.json --candidate quality/fixtures/candidate.json --baseline quality/fixtures/baseline.json --out /tmp/patchthrough-score.json
       - name: Test CLI
         working-directory: cli
         run: npm test
@@ -38,6 +40,8 @@ jobs:
           dotnet-version: 8.0.x
       - name: Verify shared contracts
         run: node tools/verify-contracts.mjs
+      - name: Exercise release-gate scorer
+        run: node quality/score.mjs --manifest quality/fixtures/corpus.json --candidate quality/fixtures/candidate.json --baseline quality/fixtures/baseline.json --out patchthrough-score.json
       - name: Test CLI
         working-directory: cli
         run: npm test

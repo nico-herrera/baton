@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchthrough.dev/schemas/corpus-score-v1.json",
+  "title": "Patchthrough release-gate score",
+  "type": "object",
+  "required": ["score_version", "platform", "quality_mode", "metrics", "gates", "qualifies"],
+  "properties": {
+    "score_version": { "const": 1 },
+    "platform": { "enum": ["macos", "windows"] },
+    "quality_mode": { "enum": ["standard", "max_accuracy"] },
+    "metrics": { "type": "object" },
+    "gates": { "type": "object", "additionalProperties": { "type": "boolean" } },
+    "qualifies": { "type": "boolean" }
+  }
+}

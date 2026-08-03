@@ -1,0 +1,26 @@
+{
+  "corpus_version": 1,
+  "name": "contract-fixture-not-a-release-corpus",
+  "private": false,
+  "items": [
+    {
+      "id": "technical",
+      "audio": "technical.wav",
+      "reference": "Deploy Patchthrough version two at 3 PM.",
+      "duration_seconds": 60,
+      "categories": ["headphones", "technical_terminology", "numbers"],
+      "technical_terms": ["Patchthrough"],
+      "context_terms": ["Patchthrough"],
+      "readability_preference": "candidate"
+    },
+    {
+      "id": "silence",
+      "audio": "silence.wav",
+      "reference": "",
+      "duration_seconds": 60,
+      "silence_seconds": 60,
+      "categories": ["silence"],
+      "readability_preference": "candidate"
+    }
+  ]
+}

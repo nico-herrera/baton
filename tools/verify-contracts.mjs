@@ -42,4 +42,10 @@ const totals = mode => registry.models
 for (const bytes of Object.values(totals('standard'))) assert(bytes <= 1_500_000_000, 'standard model budget exceeded');
 for (const bytes of Object.values(totals('max_accuracy'))) assert(bytes <= 3_000_000_000, 'max-accuracy model budget exceeded');
 
-console.log(`verified ${registry.models.length} pinned models and the shared engine transcript fixture`);
+const corpus = read('quality/fixtures/corpus.json');
+const candidate = read('quality/fixtures/candidate.json');
+assert(corpus.corpus_version === 1 && corpus.items.length > 0, 'corpus fixture is invalid');
+assert(candidate.run_version === 1 && candidate.items.length === corpus.items.length, 'score-run fixture is invalid');
+assert(candidate.items.every(item => corpus.items.some(source => source.id === item.id)), 'score run has an unknown item');
+
+console.log(`verified ${registry.models.length} pinned models, shared transcript fixture, and score fixtures`);
