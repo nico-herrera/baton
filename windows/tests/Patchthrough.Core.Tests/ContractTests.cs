@@ -102,6 +102,7 @@ public sealed class ContractTests : IDisposable
         var document = HandoffDocument.Build(directory, transcript, 92, cleanStop: true, name: null);
 
         Assert.StartsWith("# Meeting handoff: 2026.08.03-1400\n\n## Instructions\n", document);
+        Assert.DoesNotContain('\r', document);
         Assert.Contains("- Duration: 1m32s\n", document);
         Assert.Contains($"- Source: `{directory}`", document);
         // The title and engine lines of transcript.md are dropped, because this

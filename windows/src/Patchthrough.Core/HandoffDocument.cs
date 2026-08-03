@@ -54,6 +54,7 @@ public static class HandoffDocument
 
         var body = string.Join("\n", transcriptMarkdown
             .Split('\n')
+            .Select(line => line.TrimEnd('\r'))
             .SkipWhile(line => !line.StartsWith("**[", StringComparison.Ordinal)));
 
         var truncation = cleanStop
@@ -64,7 +65,7 @@ public static class HandoffDocument
         // played". The macOS copies name the Mac, which is false on Windows.
         // The sentence defines what the speaker labels mean, so it has to be
         // true on the machine that wrote the file.
-        return $"""
+        var document = $"""
         # Meeting handoff: {displayName}
 
         ## Instructions
@@ -82,6 +83,10 @@ public static class HandoffDocument
 
         {body}
         """;
+        // Raw multiline strings follow the checkout line endings. Git commonly
+        // checks this file out as CRLF on Windows, but handoff.md is a shared
+        // byte-level contract with the macOS app and npm CLI, so pin LF here.
+        return document.Replace("\r\n", "\n", StringComparison.Ordinal);
     }
 
     public static void Write(
