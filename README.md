@@ -49,6 +49,21 @@ The transcript lands in `.meeting/` inside your repository. Patchthrough adds
 `.meeting/` to the repository's **local** git excludes. Meeting content cannot reach a
 commit by accident, and Patchthrough does not touch your `.gitignore`.
 
+## Platform support
+
+Patchthrough ships two programs. They share one file format and nothing else.
+
+| | macOS | Windows | Linux |
+|---|---|---|---|
+| Record and transcribe (the app) | yes, macOS 15+, Apple Silicon | no, planned | no |
+| Hand a transcript to an agent (the CLI) | yes | yes | yes |
+| Hand a transcript to a chat site (the CLI) | yes | yes | no |
+
+The recorder is macOS only today. The CLI runs anywhere Node.js runs, and it reads any
+session that follows the
+[session v1 contract](schemas/session-v1.md). A recorder for another platform therefore
+needs no change to the CLI.
+
 ## Install the macOS app
 
 [Download Patchthrough-arm64.dmg](https://github.com/nico-herrera/patchthrough/releases/latest/download/Patchthrough-arm64.dmg),

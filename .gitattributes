@@ -1,0 +1,15 @@
+# One line ending in the repository. Git normalizes text files on commit, so a
+# clone on Windows cannot rewrite the Swift and JavaScript tree.
+* text=auto
+
+# These files run through a POSIX shell, or start with a shebang. Both need LF.
+*.sh text eol=lf
+*.js text eol=lf
+
+# The release scripts compare these files line by line, so a CRLF would read as
+# dependency drift.
+*.lock text eol=lf
+Package.resolved text eol=lf
+
+# Keep the icon sources out of the normalizer.
+*.png binary
