@@ -49,6 +49,51 @@ patchthrough hand claude --file meeting.md
 cat meeting.md | patchthrough hand codex --file -
 ```
 
+## Chat websites
+
+`--web` opens a chat site instead of a terminal agent. It needs no repository and
+no installed app:
+
+```sh
+patchthrough hand --web claude
+patchthrough hand --web chatgpt
+patchthrough hand --web m365
+```
+
+Patchthrough puts `handoff.md` on the clipboard as a file and opens the site. One
+paste (⌘V) attaches the transcript. macOS only, because this uses the macOS
+clipboard.
+
+The CLI cannot paste for you as reliably as the app can. macOS grants
+Accessibility to the terminal that runs the command rather than to Patchthrough,
+so without that grant the CLI tells you to paste instead of claiming a paste that
+never happened.
+
+Microsoft copies an attached file into your work OneDrive, so `--web m365` warns
+you that the transcript leaves your machine.
+
+## Your own sites
+
+Anything listed in `custom_destinations` in
+`~/.config/patchthrough/config.json` works as a `--web` target too:
+
+```json
+{
+  "custom_destinations": [
+    { "id": "internal", "label": "Internal tool",
+      "url": "https://tool.example.com/chat" }
+  ]
+}
+```
+
+```sh
+patchthrough hand --web internal
+```
+
+The app writes this file from its Settings sheet, so a destination you add there
+is available here with no extra step. `url` must start with `http://` or
+`https://`.
+
 Known terminal agents: Claude Code, Copilot, Codex, Kimi, opencode, and
 cursor-agent.
 
