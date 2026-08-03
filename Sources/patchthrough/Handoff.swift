@@ -93,6 +93,21 @@ enum Handoff {
             case appClipboard(appName: String)   // open -a <App>, handoff file on the clipboard
             case claudeChat                      // claude://claude.ai/new deeplink + handoff file on the clipboard
             case claudeCode                      // claude://code/new deeplink, repo mounted, transcript staged
+            case webChat(Site)                   // chat site in the browser, handoff file on the clipboard
+        }
+
+        /// A chat website whose composer takes a pasted file. Verified by hand
+        /// against each site, because none of this is documented.
+        struct Site {
+            let newChatURL: String
+            /// The site prefills its composer from a `q` query item. Microsoft
+            /// ignores one and does not need it, because handoff.md carries
+            /// the instructions on its own.
+            let prefillsPrompt: Bool
+            /// The site copies the attached file into cloud storage. Microsoft
+            /// puts it in the work OneDrive, so the file leaves the machine
+            /// and the user has to agree first.
+            let uploadsToCloud: Bool
         }
 
         /// The M365 Copilot composer (WebView2) swallows synthetic clicks
@@ -108,7 +123,7 @@ enum Handoff {
         var needsRepo: Bool {
             switch kind {
             case .vscodeChat, .cursorDeeplink, .claudeCode: return true
-            case .appClipboard, .claudeChat: return false
+            case .appClipboard, .claudeChat, .webChat: return false
             }
         }
     }
@@ -134,6 +149,19 @@ enum Handoff {
         // needs a door.
         GuiTarget(id: "m365-copilot", label: "Microsoft 365 Copilot",
                   kind: .appClipboard(appName: "Microsoft 365 Copilot")),
+        // The browser doors. Every one of these takes a pasted file in its
+        // composer, so they need no installed app at all. Microsoft's is the
+        // only way to attach a file to M365 Copilot: the desktop app drops a
+        // pasted file, and this one keeps the name.
+        GuiTarget(id: "web-claude", label: "Claude (web)",
+                  kind: .webChat(GuiTarget.Site(newChatURL: "https://claude.ai/new",
+                                                prefillsPrompt: true, uploadsToCloud: false))),
+        GuiTarget(id: "web-chatgpt", label: "ChatGPT (web)",
+                  kind: .webChat(GuiTarget.Site(newChatURL: "https://chatgpt.com/",
+                                                prefillsPrompt: true, uploadsToCloud: false))),
+        GuiTarget(id: "web-m365", label: "Microsoft 365 Copilot (web)",
+                  kind: .webChat(GuiTarget.Site(newChatURL: "https://m365.cloud.microsoft/chat/",
+                                                prefillsPrompt: false, uploadsToCloud: true))),
     ]
 
     /// SF Symbols per destination. Keyed by id so terminal agents and GUI
@@ -141,6 +169,7 @@ enum Handoff {
     /// whichever door the handoff uses.
     static func symbol(for id: String) -> String {
         switch id {
+        case "web-claude", "web-chatgpt", "web-m365": return "globe"
         case "claude":        return "sparkle"
         case "copilot":       return "chevron.left.forwardslash.chevron.right"
         case "codex":         return "bubble.left.and.text.bubble.right"
@@ -178,6 +207,9 @@ enum Handoff {
                 return appInstalled(app)
             case .claudeChat, .claudeCode:
                 return appInstalled("Claude")
+            case .webChat:
+                // A browser is the only requirement, and macOS always has one.
+                return true
             }
         }
     }
@@ -260,17 +292,47 @@ enum Handoff {
                 ("q", prompt(for: session)),
                 ("folder", repo.path),
             ])
+
+        case .webChat(let site):
+            // Same clipboard payload as the desktop chat apps. The browser
+            // turns a pasted file reference into an attachment, so one paste
+            // finishes the handoff, and no app has to be installed.
+            copyFileReference(exportHandoffFile(for: session))
+            var url = site.newChatURL
+            if site.prefillsPrompt {
+                url += (url.contains("?") ? "&" : "?") + "q=\(pctEncoded(webPrompt(for: session)))"
+            }
+            let open = Process()
+            open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            open.arguments = [url]
+            try? open.run()
+            open.waitUntilExit()
         }
     }
 
     /// `claude://<host>/new?<query>`. Values are percent-encoded down to
     /// alphanumerics: the app parses the query with URLSearchParams, which
     /// also decodes `+` as a space, so anything milder corrupts the prompt.
+    /// Percent-encode down to alphanumerics. Anything milder corrupts a
+    /// prompt: these parsers read the query with URLSearchParams, which also
+    /// decodes `+` as a space.
+    static func pctEncoded(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+    }
+
+    /// The browser that will receive the paste. The handoff opens a plain
+    /// https URL, so the paste has to go to whichever browser macOS chose,
+    /// not to a hardcoded one.
+    static func defaultBrowserName() -> String? {
+        guard let https = URL(string: "https://example.com"),
+              let app = NSWorkspace.shared.urlForApplication(toOpen: https)
+        else { return nil }
+        return FileManager.default.displayName(atPath: app.path)
+            .replacingOccurrences(of: ".app", with: "")
+    }
+
     private static func openClaudeDeeplink(host: String, query: [(String, String)]) {
-        let qs = query.compactMap { key, value in
-            value.addingPercentEncoding(withAllowedCharacters: .alphanumerics)
-                .map { "\(key)=\($0)" }
-        }.joined(separator: "&")
+        let qs = query.map { "\($0)=\(pctEncoded($1))" }.joined(separator: "&")
         let open = Process()
         open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         open.arguments = ["claude://\(host)/new?\(qs)"]
@@ -309,10 +371,10 @@ enum Handoff {
     /// status alone reports success for a paste that never landed. Checking
     /// first also means no keystrokes get injected into whatever window is
     /// frontmost when the paste cannot work anyway.
-    static func autoPaste(app: String, newChat: Bool) -> Bool {
+    static func autoPaste(app: String, newChat: Bool, settle: Double = 1.2) -> Bool {
         guard AXIsProcessTrusted() else { return false }
         var lines = [
-            "delay 1.2",
+            "delay \(settle)",
             "tell application \"\(app)\" to activate",
             "delay 0.4",
             "tell application \"System Events\"",
@@ -340,6 +402,24 @@ enum Handoff {
     technical terms, and 'me'/'them' labels that can be wrong. Read for \
     intent, not literal wording.
     """
+
+    /// Prompt for the browser doors. It never names the attached file:
+    /// chatgpt.com renames a pasted file to a UUID and strips the extension,
+    /// so an instruction to read handoff.md sends the agent looking for a
+    /// file it cannot see. The CLI in `cli/` carries the same text.
+    static func webPrompt(for session: Session) -> String {
+        """
+        The attached file is the transcript of a meeting I just had \
+        (\(session.duration), machine-transcribed on-device). Read it, work \
+        out what it asks of me, then give me:
+
+        1. Concrete work items it implies, ordered by what should happen first.
+        2. Anything stated as a decision or constraint I shouldn't relitigate.
+        3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
+
+        \(asrCaveat)
+        """
+    }
 
     static func chatPrompt(for session: Session) -> String {
         """

@@ -18,7 +18,8 @@ final class MenuBarController {
         }
         let mostUsed: [Entry]     // top 3 by use
         let terminal: [Entry]     // remainder, CLI
-        let app: [Entry]          // remainder, GUI
+        let app: [Entry]          // remainder, installed apps
+        let web: [Entry]          // remainder, browser doors
         let top: Entry?
         let latestTimeLabel: String?   // "9:45 PM"
         let sessionCount: Int
@@ -34,7 +35,7 @@ final class MenuBarController {
     private var recordingDot: NSView?
     private var isRecording = false
     private var model = HandoffMenuModel(
-        mostUsed: [], terminal: [], app: [], top: nil, latestTimeLabel: nil, sessionCount: 0
+        mostUsed: [], terminal: [], app: [], web: [], top: nil, latestTimeLabel: nil, sessionCount: 0
     )
 
     var onToggle: (() -> Void)?
@@ -190,7 +191,8 @@ final class MenuBarController {
 
         let sub = handoffItem.submenu ?? NSMenu()
         sub.removeAllItems()
-        let hasAny = !(model.mostUsed.isEmpty && model.terminal.isEmpty && model.app.isEmpty)
+        let hasAny = !(model.mostUsed.isEmpty && model.terminal.isEmpty
+                       && model.app.isEmpty && model.web.isEmpty)
         handoffItem.isEnabled = hasAny && model.latestTimeLabel != nil && !isRecording
 
         func add(_ entries: [HandoffMenuModel.Entry], header: String) {
@@ -210,6 +212,7 @@ final class MenuBarController {
         add(model.mostUsed, header: "Most used")
         add(model.terminal, header: "Terminal")
         add(model.app, header: "App")
+        add(model.web, header: "Web")
         handoffItem.submenu = sub
     }
 
