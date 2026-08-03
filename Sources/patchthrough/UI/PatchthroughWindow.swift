@@ -21,9 +21,10 @@ final class SessionStore: ObservableObject {
 
         enum Status { case ready, pending, broken }
 
-        /// The row's second line: the name the user gave this meeting, or the
-        /// first thing said, which is all a session otherwise has.
-        var firstLine: String { title ?? segments.first?.text ?? "" }
+        /// The row's second line: the first thing said. A name never replaces
+        /// it, because the name says what the meeting was and this says how it
+        /// opened. The two answer different questions.
+        var firstLine: String { segments.first?.text ?? "" }
 
         var statusSymbol: String {
             switch status {
@@ -898,25 +899,39 @@ struct PatchthroughRootView: View {
                         Text(timeLabel(item))
                             .font(selected ? PT.F.sessionTime : PT.F.sessionTime2)
                             .foregroundStyle(selected ? PT.C.text : PT.C.text2)
-                        Text(item.duration)
-                            .font(PT.F.monoSmall)
-                            .foregroundStyle(selected ? PT.C.signalInk : PT.C.text4)
+                            .fixedSize()
+                        if renamingID == item.id {
+                            TextField("", text: $renameText, prompt:
+                                Text("Name this meeting").foregroundColor(PT.C.text5))
+                                .textFieldStyle(.plain)
+                                .font(PT.F.sessionLine)
+                                .foregroundStyle(PT.C.text)
+                                .focused($renameFocused)
+                                .onSubmit { commitRename(item) }
+                                .onExitCommand { renamingID = nil }
+                        } else if let title = item.title {
+                            Text(title)
+                                .font(PT.F.sessionLine)
+                                .foregroundStyle(selected ? PT.C.text : PT.C.text2)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
                     }
-                    if renamingID == item.id {
-                        TextField("", text: $renameText, prompt:
-                            Text("Name this meeting").foregroundColor(PT.C.text5))
-                            .textFieldStyle(.plain)
-                            .font(PT.F.sessionLine)
-                            .foregroundStyle(PT.C.text)
-                            .focused($renameFocused)
-                            .onSubmit { commitRename(item) }
-                            .onExitCommand { renamingID = nil }
-                    } else {
+                    // The duration sits on the second line, trailing, which
+                    // 11a does not do: the mock had no name to fit beside the
+                    // time. A 252pt sidebar cannot hold time, duration and a
+                    // name on one line, and the name reads first.
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
                         Text(item.firstLine)
                             .font(PT.F.sessionLine)
                             .foregroundStyle(selected ? PT.C.textSel : PT.C.text4)
                             .lineLimit(1)
                             .truncationMode(.tail)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(item.duration)
+                            .font(PT.F.monoSmall)
+                            .foregroundStyle(selected ? PT.C.signalInk : PT.C.text4)
+                            .fixedSize()
                     }
                 }
             } else {
@@ -926,9 +941,19 @@ struct PatchthroughRootView: View {
                         .foregroundStyle(item.status == .broken ? PT.C.signalLit : PT.C.text3)
                         .font(PT.F.iconSmall)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(timeLabel(item))
-                            .font(PT.F.sessionTime2)
-                            .foregroundStyle(PT.C.text2)
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Text(timeLabel(item))
+                                .font(PT.F.sessionTime2)
+                                .foregroundStyle(PT.C.text2)
+                                .fixedSize()
+                            if let title = item.title {
+                                Text(title)
+                                    .font(PT.F.sessionLine)
+                                    .foregroundStyle(PT.C.text2)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                        }
                         Text(item.subtitle)
                             .font(PT.F.sessionLine)
                             .foregroundStyle(PT.C.text4)
@@ -945,8 +970,8 @@ struct PatchthroughRootView: View {
         )
     }
 
-    /// Turn the row's second line into a field. Renaming in place beats a
-    /// dialog: the name sits where the user is already looking.
+    /// Turn the name's slot on the row's first line into a field. Renaming in
+    /// place beats a dialog: the name sits where the user is already looking.
     private func beginRenaming(_ item: SessionStore.Item) {
         store.selection = item.id
         renameText = item.title ?? ""
