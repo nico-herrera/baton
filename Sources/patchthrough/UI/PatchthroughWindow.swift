@@ -16,11 +16,14 @@ final class SessionStore: ObservableObject {
         let segments: [Segment]
         let status: Status
         let cleanStop: Bool
+        /// What the user named this meeting, from `meta.json`.
+        let title: String?
 
         enum Status { case ready, pending, broken }
 
-        /// The first thing said. A session has no other human-readable identifier.
-        var firstLine: String { segments.first?.text ?? "" }
+        /// The row's second line: the name the user gave this meeting, or the
+        /// first thing said, which is all a session otherwise has.
+        var firstLine: String { title ?? segments.first?.text ?? "" }
 
         var statusSymbol: String {
             switch status {
@@ -116,6 +119,7 @@ final class SessionStore: ObservableObject {
         let q = search.lowercased()
         return items.filter { item in
             item.id.lowercased().contains(q)
+                || (item.title?.lowercased().contains(q) ?? false)
                 || item.segments.contains { $0.text.lowercased().contains(q) }
         }
     }
@@ -211,15 +215,40 @@ final class SessionStore: ObservableObject {
             if let sess = try? Handoff.resolveSession(named: name, root: root) {
                 return Item(id: name, dir: dir, date: date, duration: sess.duration,
                             words: sess.words, segments: Self.parseSegments(dir),
-                            status: .ready, cleanStop: sess.cleanStop)
+                            status: .ready, cleanStop: sess.cleanStop, title: sess.title)
             }
             let hasMeta = fm.fileExists(atPath: dir.appendingPathComponent("meta.json").path)
             return Item(id: name, dir: dir, date: date, duration: "", words: 0, segments: [],
-                        status: hasMeta ? .pending : .broken, cleanStop: true)
+                        status: hasMeta ? .pending : .broken, cleanStop: true,
+                        title: Self.storedTitle(dir))
         }
 
         if selection == nil || !items.contains(where: { $0.id == selection }) {
             selection = items.first(where: { $0.status == .ready })?.id
+        }
+    }
+
+    /// A name for a session that has no transcript yet, so a recording still
+    /// being processed shows what the user called it.
+    static func storedTitle(_ dir: URL) -> String? {
+        guard let data = try? Data(contentsOf: dir.appendingPathComponent("meta.json")),
+              let meta = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let name = (meta["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty
+        else { return nil }
+        return name
+    }
+
+    /// Name or rename a session. The name lives in the session's `meta.json`,
+    /// so it survives a restart and any tool that reads the folder sees it.
+    func rename(_ item: Item, to title: String?) {
+        do {
+            try Handoff.rename(sessionDir: item.dir, to: title)
+            refresh()
+            let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            lastAction = trimmed.isEmpty ? "name cleared" : "renamed to \"\(trimmed)\""
+        } catch {
+            lastAction = "couldn't rename: \(error.localizedDescription)"
         }
     }
 
@@ -411,6 +440,9 @@ struct PatchthroughRootView: View {
     /// The sidebar search field is hand-built (see `searchField`), so ⌘F has
     /// to be wired up by hand too. `.searchable` used to supply ⌘F.
     @FocusState private var searchFocused: Bool
+    @State private var renamingID: String?
+    @State private var renameText = ""
+    @FocusState private var renameFocused: Bool
     @State private var showDestinationMenu = false
     /// The hover/keyboard highlight in the destination menu. It persists when
     /// the pointer leaves a row: falling back to the default highlight made
@@ -768,6 +800,18 @@ struct PatchthroughRootView: View {
                             sidebarRow(item, selected: store.selection == item.id)
                                 .contentShape(Rectangle())
                                 .onTapGesture { store.selection = item.id }
+                                .contextMenu {
+                                    Button(item.title == nil ? "Name…" : "Rename…") {
+                                        beginRenaming(item)
+                                    }
+                                    if item.title != nil {
+                                        Button("Remove name") { store.rename(item, to: nil) }
+                                    }
+                                    Divider()
+                                    Button("Show in Finder") {
+                                        NSWorkspace.shared.activateFileViewerSelecting([item.dir])
+                                    }
+                                }
                         }
                     }
                 }
@@ -858,11 +902,22 @@ struct PatchthroughRootView: View {
                             .font(PT.F.monoSmall)
                             .foregroundStyle(selected ? PT.C.signalInk : PT.C.text4)
                     }
-                    Text(item.firstLine)
-                        .font(PT.F.sessionLine)
-                        .foregroundStyle(selected ? PT.C.textSel : PT.C.text4)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    if renamingID == item.id {
+                        TextField("", text: $renameText, prompt:
+                            Text("Name this meeting").foregroundColor(PT.C.text5))
+                            .textFieldStyle(.plain)
+                            .font(PT.F.sessionLine)
+                            .foregroundStyle(PT.C.text)
+                            .focused($renameFocused)
+                            .onSubmit { commitRename(item) }
+                            .onExitCommand { renamingID = nil }
+                    } else {
+                        Text(item.firstLine)
+                            .font(PT.F.sessionLine)
+                            .foregroundStyle(selected ? PT.C.textSel : PT.C.text4)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                 }
             } else {
                 // Pending/broken keep their status glyph and subtitle.
@@ -888,6 +943,20 @@ struct PatchthroughRootView: View {
                 .fill(selected ? PT.C.signal.opacity(0.15) : .clear)
                 .strokeBorder(selected ? PT.C.signal.opacity(0.32) : .clear, lineWidth: 1)
         )
+    }
+
+    /// Turn the row's second line into a field. Renaming in place beats a
+    /// dialog: the name sits where the user is already looking.
+    private func beginRenaming(_ item: SessionStore.Item) {
+        store.selection = item.id
+        renameText = item.title ?? ""
+        renamingID = item.id
+        renameFocused = true
+    }
+
+    private func commitRename(_ item: SessionStore.Item) {
+        store.rename(item, to: renameText)
+        renamingID = nil
     }
 
     private func timeLabel(_ item: SessionStore.Item) -> String {
@@ -962,11 +1031,21 @@ struct PatchthroughRootView: View {
     /// folder name on the trailing edge. The tooltip carries the full path.
     private func detailHeader(_ item: SessionStore.Item) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(item.id).font(PT.F.mono)
-                .foregroundStyle(PT.C.text)
-            Text("\(item.duration) · \(item.words) words · \(item.segments.count) segments")
-                .font(PT.F.caption)
-                .foregroundStyle(PT.C.label)
+            // A named meeting leads with its name, and the folder id moves
+            // into the stats line where it stays available without competing.
+            if let title = item.title {
+                Text(title).font(PT.F.settingRow)
+                    .foregroundStyle(PT.C.text)
+                Text("\(item.id) · \(item.duration) · \(item.words) words")
+                    .font(PT.F.caption)
+                    .foregroundStyle(PT.C.label)
+            } else {
+                Text(item.id).font(PT.F.mono)
+                    .foregroundStyle(PT.C.text)
+                Text("\(item.duration) · \(item.words) words · \(item.segments.count) segments")
+                    .font(PT.F.caption)
+                    .foregroundStyle(PT.C.label)
+            }
             Spacer()
             Button {
                 _ = store.pickRepo()
@@ -1052,6 +1131,17 @@ struct PatchthroughRootView: View {
 
 /// Fixed frame, no scrolling. Every toggle carries a one-line subtitle
 /// stating its tradeoff.
+/// Scrolls a settings sheet's middle section and caps how tall it can get.
+/// The cap is a fraction of the screen rather than a constant, because the
+/// sheet has to stay usable on a laptop display and on a 27-inch one.
+private extension View {
+    func scrollableSheetBody() -> some View {
+        ScrollView(.vertical) { self }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(maxHeight: PT.M.sheetBodyMaxHeight)
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject var store: SessionStore
     @Environment(\.dismiss) private var dismiss
@@ -1063,14 +1153,26 @@ struct SettingsView: View {
     @State private var launchAtLogin = false
     @State private var onStop = ""
     @State private var terminalID = TerminalApp.known[0].id
+    @State private var customDestinations: [CustomDraft] = []
     @State private var error: String?
     @FocusState private var focused: Field?
+
+    /// An editable row. The config id stays put while the label is retyped,
+    /// because the id is the ranking key: deriving it from the label every
+    /// time would reset a destination's usage count on a rename.
+    private struct CustomDraft: Identifiable {
+        let id = UUID()
+        var configID: String
+        var label: String
+        var url: String
+        var uploadsToCloud: Bool
+    }
 
     /// Only terminals that are on this Mac. An absent terminal produces a
     /// handoff that silently does nothing.
     private let terminals = TerminalApp.installed()
 
-    private enum Field { case recordingsDir, hook }
+    private enum Field: Hashable { case recordingsDir, hook, customLabel(UUID), customURL(UUID) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1147,6 +1249,29 @@ struct SettingsView: View {
                     }
                 }
 
+                section("Your destinations") {
+                    ForEach($customDestinations) { $destination in
+                        card { customDestinationRow($destination) }
+                    }
+                    HStack(spacing: 9) {
+                        chip("Add a destination", hPad: 12) {
+                            customDestinations.append(CustomDraft(
+                                configID: "", label: "", url: "", uploadsToCloud: false
+                            ))
+                        }
+                        Spacer()
+                    }
+                    caption("Any web app with a chat box. Patchthrough opens it, pastes the "
+                            + "transcript in as an attachment, and lists it under Custom in the "
+                            + "patch-through menu. Nobody else sees these.")
+                    caption("Turn on the copy warning for a site that files an attachment into "
+                            + "storage of its own rather than reading it and forgetting it. "
+                            + "Microsoft 365 Copilot does this: it puts an attached file in your "
+                            + "work OneDrive, where it stays. Patchthrough then asks before every "
+                            + "handoff to that site, so a meeting transcript never leaves this "
+                            + "Mac by surprise.")
+                }
+
                 section("After each transcript") {
                     well(text: $onStop, placeholder: "my-hook")
                         .focused($focused, equals: .hook)
@@ -1160,6 +1285,11 @@ struct SettingsView: View {
             }
             .padding(.horizontal, PT.M.sheetPadH)
             .padding(.vertical, 18)
+            // The sections used to fit. They no longer do: the destination
+            // list grows with what the user adds. Scroll the middle and keep
+            // the header and the Save row pinned, so Save never walks off the
+            // bottom of the screen.
+            .scrollableSheetBody()
 
             Rectangle().fill(PT.C.hairline).frame(height: 1)
             HStack(spacing: 10) {
@@ -1238,6 +1368,36 @@ struct SettingsView: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+
+    /// One editable custom destination. Two wells and a remove control, so the
+    /// row gains no visual language the sheet does not already use.
+    private func customDestinationRow(_ destination: Binding<CustomDraft>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 9) {
+                well(text: destination.label, placeholder: "Name")
+                    .focused($focused, equals: .customLabel(destination.wrappedValue.id))
+                    .frame(width: 150)
+                well(text: destination.url, placeholder: "https://tool.example.com/chat")
+                    .focused($focused, equals: .customURL(destination.wrappedValue.id))
+                Button {
+                    customDestinations.removeAll { $0.id == destination.wrappedValue.id }
+                } label: {
+                    Image(systemName: "trash")
+                        .font(PT.F.icon)
+                        .foregroundStyle(PT.C.text3)
+                        .padding(.horizontal, 4)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Remove this destination")
+            }
+            toggleRow("This site keeps a copy of the transcript",
+                      subtitle: "Warn me before each handoff, because the file leaves this Mac",
+                      isOn: destination.uploadsToCloud)
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 11)
     }
 
     private func caption(_ text: String) -> some View {
@@ -1386,6 +1546,60 @@ struct SettingsView: View {
         launchAtLogin = LaunchAtLogin.isEnabled
         onStop = Config.onStop() ?? ""
         terminalID = TerminalApp.current().id
+        customDestinations = Config.customDestinations().map {
+            CustomDraft(configID: $0.id, label: $0.label,
+                        url: $0.url.absoluteString, uploadsToCloud: $0.uploadsToCloud)
+        }
+    }
+
+    /// A config id derived from the name, used only when a row is new. Ids are
+    /// ranking keys, so an existing row keeps the one it already has.
+    private func slug(_ name: String) -> String {
+        let mapped = name.lowercased().map { character -> Character in
+            character.isASCII && (character.isLetter || character.isNumber) ? character : "-"
+        }
+        let collapsed = String(mapped).split(separator: "-", omittingEmptySubsequences: true)
+        return collapsed.joined(separator: "-")
+    }
+
+    /// Rows to write, or nil with `error` set to name the first row that cannot
+    /// be saved. The config reader skips a malformed entry silently, which is
+    /// right for a hand-edited file and wrong for a form the user is looking at.
+    private func customDestinationsPayload() -> [[String: Any]]? {
+        var rows: [[String: Any]] = []
+        var seen = Set<String>()
+
+        for destination in customDestinations {
+            let name = destination.label.trimmingCharacters(in: .whitespaces)
+            let address = destination.url.trimmingCharacters(in: .whitespaces)
+            if name.isEmpty && address.isEmpty { continue }   // an untouched new row
+            guard !name.isEmpty else {
+                error = "Give every destination a name."
+                return nil
+            }
+            guard let url = URL(string: address), let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https", url.host != nil else {
+                error = "\"\(name)\" needs an address that starts with http:// or https://"
+                return nil
+            }
+            let id = destination.configID.isEmpty ? slug(name) : destination.configID
+            guard !id.isEmpty else {
+                error = "\"\(name)\" needs at least one letter or number in its name."
+                return nil
+            }
+            guard seen.insert(id).inserted else {
+                error = "Two destinations share the id \"\(id)\". Rename one."
+                return nil
+            }
+            rows.append([
+                "id": id,
+                "label": name,
+                "url": url.absoluteString,
+                "prefills_prompt": true,
+                "uploads_to_cloud": destination.uploadsToCloud,
+            ])
+        }
+        return rows
     }
 
     private func chooseFolder() {
@@ -1402,6 +1616,7 @@ struct SettingsView: View {
     private func save() {
         let trimmedDir = recordingsDir.trimmingCharacters(in: .whitespaces)
         let trimmedHook = onStop.trimmingCharacters(in: .whitespaces)
+        guard let destinations = customDestinationsPayload() else { return }
         do {
             try Config.update([
                 "recordings_dir": (trimmedDir.isEmpty || trimmedDir == "~/Recordings") ? nil : trimmedDir,
@@ -1412,10 +1627,14 @@ struct SettingsView: View {
                 // Only written when it isn't the default, so the config keeps
                 // holding deliberate overrides only.
                 "terminal": terminalID == TerminalApp.known[0].id ? nil : terminalID,
+                "custom_destinations": destinations.isEmpty ? nil : destinations,
             ])
             if launchAtLogin != LaunchAtLogin.isEnabled {
                 try LaunchAtLogin.setEnabled(launchAtLogin)
             }
+            // The menus read destinations once per refresh, so a saved
+            // destination has to trigger one or it appears only on the next.
+            store.refresh()
             store.lastAction = "settings saved"
             dismiss()
         } catch {

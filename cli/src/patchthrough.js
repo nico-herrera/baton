@@ -107,7 +107,7 @@ function buildHandoffDocument(session) {
   const truncation = session.cleanStop === false
     ? ' (recording ended uncleanly, so the transcript may be truncated)'
     : '';
-  return `# Meeting handoff: ${session.name}
+  return `# Meeting handoff: ${session.title || session.name}
 
 ## Instructions
 
@@ -147,9 +147,13 @@ function readSession(sessionDir) {
     throw new Error(`session '${path.basename(sessionDir)}' has an empty transcript`);
   }
   const meta = readMeta(sessionDir);
+  // A name the user gave the meeting in the app, from meta.json. The folder
+  // timestamp is a poor title, so the handoff document prefers this.
+  const title = typeof meta.name === 'string' ? meta.name.trim() : '';
   const session = {
     dir: sessionDir,
     name: path.basename(sessionDir),
+    title: title || null,
     sourcePath: sessionDir,
     transcript,
     segments: segments.length,

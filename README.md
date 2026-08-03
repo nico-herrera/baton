@@ -153,9 +153,15 @@ menu bar. Each app gets the best entry point that the app exposes:
 | `web-chatgpt` | chatgpt.com opens the same way |
 | `web-m365` | m365.cloud.microsoft opens a new chat. This is the only way to attach a file to M365 Copilot, because the desktop app drops one. **Microsoft copies the attachment to your work OneDrive**, so Patchthrough asks first |
 
+**Name a meeting.** A folder timestamp is a poor title. Right-click a session in the
+window and choose Rename to give it one. The name goes in that session's `meta.json`, so
+it survives a restart, and the handoff document uses it as its title, which gives the
+agent something better than `2026.07.30-2145` to refer to.
+
 **Your own destinations.** Any web app with a chat box that accepts a pasted file can be
-a destination. Add it to `custom_destinations` in the config and it appears under
-**Custom**, on your machine only:
+a destination. Add one in Settings under **Your destinations**, or write it into
+`custom_destinations` in the config. Either way it appears under **Custom** in the
+patch-through menu, on your machine only:
 
 ```json
 {

@@ -136,6 +136,10 @@ enum PT {
         static let titleBarHeight: CGFloat = 52
         static let windowMin = CGSize(width: 860, height: 660)
         static let settingsWidth: CGFloat = 560
+        /// Ceiling for the scrolling part of the settings sheet. 10d sized the
+        /// sheet to fit without scrolling, and the custom destination list
+        /// broke that assumption: it grows with what the user adds.
+        static let sheetBodyMaxHeight: CGFloat = 620
 
         // 10d's settings switch: 38×22 pill, 18pt knob inset 2pt.
         static let switchTrackWidth: CGFloat = 38

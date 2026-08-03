@@ -18,6 +18,11 @@ engine. Integrations must use the following public contract:
 
 - `meta.json` contains `duration_seconds` and `clean_stop`. Ignore unknown
   keys.
+- `meta.json` can also contain `name`, the title the user gave the meeting.
+  Treat it as optional: most sessions have no name. Prefer it over the
+  directory name for anything a person or an agent reads. Keep using the
+  directory name as the identifier, because a name is not unique and can
+  change.
 - `transcript.md` is the readable transcript. Spoken segments begin with
   `**[timestamp] speaker:**`.
 - `handoff.md` is a self-contained agent handoff. It holds the instructions,
