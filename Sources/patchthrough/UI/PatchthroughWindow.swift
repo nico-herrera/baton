@@ -54,12 +54,23 @@ final class SessionStore: ObservableObject {
         let lines: [String]
     }
 
+    /// Menu grouping. Terminal agents own a TTY, apps need an install, and web
+    /// doors need neither. The three read differently to a user choosing where
+    /// a meeting goes, so they get their own sections.
+    enum Category: String {
+        case terminal = "Terminal"
+        case app = "App"
+        case web = "Web"
+    }
+
     struct Destination: Identifiable {
         let id: String
         let label: String
         let symbol: String
-        let isTerminal: Bool
+        let category: Category
         let needsRepo: Bool
+
+        var isTerminal: Bool { category == .terminal }
 
         var shortLabel: String { label.components(separatedBy: " (").first ?? label }
 
@@ -137,11 +148,14 @@ final class SessionStore: ObservableObject {
         // next to section headers that already say Terminal and App.
         let terminal = Handoff.installedAgents().map {
             Destination(id: "cli:\($0.agent.name)", label: $0.agent.displayName,
-                        symbol: "terminal", isTerminal: true, needsRepo: true)
+                        symbol: "terminal", category: .terminal, needsRepo: true)
         }
         let gui = Handoff.installedGuiTargets().map { t in
-            Destination(id: "gui:\(t.id)", label: t.label, symbol: "app",
-                        isTerminal: false, needsRepo: t.needsRepo)
+            let isWeb: Bool
+            if case .webChat = t.kind { isWeb = true } else { isWeb = false }
+            return Destination(id: "gui:\(t.id)", label: t.label,
+                               symbol: isWeb ? "globe" : "app",
+                               category: isWeb ? .web : .app, needsRepo: t.needsRepo)
         }
         return terminal + gui
     }
@@ -277,6 +291,13 @@ final class SessionStore: ObservableObject {
                 lastAction = "handoff to \(dest.shortLabel) cancelled"
                 return
             }
+            // A site that copies the attachment into cloud storage breaks the
+            // on-device promise, so the user agrees before the file moves.
+            if case .webChat(let site) = target.kind, site.uploadsToCloud,
+               !HandoffAlert.confirmCloudUpload(site: dest.shortLabel) {
+                lastAction = "handoff to \(dest.shortLabel) cancelled"
+                return
+            }
             Handoff.launchGui(target: target, session: sess, repo: repo)
             switch target.kind {
             case .appClipboard(let appName):
@@ -297,6 +318,15 @@ final class SessionStore: ObservableObject {
                 }
             case .claudeCode:
                 lastAction = "new Claude Code session in \(repo?.lastPathComponent ?? "?") (transcript staged)"
+            case .webChat:
+                // The browser needs longer than an app to be ready for a
+                // paste: it has to load the page first.
+                if let browser = Handoff.defaultBrowserName(), Config.autoPaste() {
+                    lastAction = "\(dest.shortLabel) opening in \(browser). Attaching the transcript…"
+                    finishPaste(app: browser, label: dest.shortLabel, newChat: false, settle: 5)
+                } else {
+                    lastAction = "\(dest.shortLabel) opened. The handoff file is on your clipboard (⌘V attaches it)"
+                }
             default:
                 lastAction = "patched through to \(dest.shortLabel) in \(repo?.lastPathComponent ?? "?")"
             }
@@ -308,9 +338,11 @@ final class SessionStore: ObservableObject {
     /// The paste script sleeps about two seconds while the app comes up, so it
     /// runs off the main actor. Otherwise every clipboard handoff freezes the
     /// window for the duration.
-    private func finishPaste(app: String, label: String, newChat: Bool) {
+    private func finishPaste(app: String, label: String, newChat: Bool, settle: Double = 1.2) {
         Task {
-            let pasted = await Task.detached { Handoff.autoPaste(app: app, newChat: newChat) }.value
+            let pasted = await Task.detached {
+                Handoff.autoPaste(app: app, newChat: newChat, settle: settle)
+            }.value
             guard !pasted else { return }
             lastAction = "\(label) opened. The handoff file is on your clipboard (⌘V attaches it)"
             HandoffAlert.showPasteFailed(app: app)
@@ -556,11 +588,14 @@ struct PatchthroughRootView: View {
     /// Menu order: three most-used, then terminals, then apps. Keyboard
     /// navigation walks the same flattened order the rows render in.
     private var menuSections: (top: [SessionStore.Destination],
-                               terminal: [SessionStore.Destination],
-                               app: [SessionStore.Destination]) {
+                               rest: [(SessionStore.Category, [SessionStore.Destination])]) {
         let ranked = store.rankedDestinations
         let rest = Array(ranked.dropFirst(3))
-        return (Array(ranked.prefix(3)), rest.filter(\.isTerminal), rest.filter { !$0.isTerminal })
+        let grouped: [(SessionStore.Category, [SessionStore.Destination])] =
+            [.terminal, .app, .web].map { category in
+                (category, rest.filter { $0.category == category })
+            }
+        return (Array(ranked.prefix(3)), grouped.filter { !$0.1.isEmpty })
     }
 
     private var destinationMenuPanel: some View {
@@ -573,17 +608,10 @@ struct PatchthroughRootView: View {
                 destinationMenuRow(dest, count: counts[dest.id] ?? 0, isMostUsed: true)
             }
 
-            if !sections.terminal.isEmpty {
-                menuDivider
-                menuSectionHeader("Terminal")
-                ForEach(sections.terminal) { dest in
-                    destinationMenuRow(dest, count: 0, isMostUsed: false)
-                }
-            }
-
-            if !sections.app.isEmpty {
-                menuSectionHeader("App")
-                ForEach(sections.app) { dest in
+            ForEach(Array(sections.rest.enumerated()), id: \.element.0) { index, group in
+                if index == 0 { menuDivider }
+                menuSectionHeader(group.0.rawValue)
+                ForEach(group.1) { dest in
                     destinationMenuRow(dest, count: 0, isMostUsed: false)
                 }
             }
@@ -613,7 +641,7 @@ struct PatchthroughRootView: View {
 
     private func moveHighlight(_ delta: Int) {
         let sections = menuSections
-        let items = sections.top + sections.terminal + sections.app
+        let items = sections.top + sections.rest.flatMap(\.1)
         guard !items.isEmpty else { return }
         guard let current = items.firstIndex(where: { $0.id == highlightedDestination }) else {
             highlightedDestination = (delta > 0 ? items.first : items.last)?.id

@@ -59,6 +59,11 @@ function formatDuration(seconds) {
     : `${minutes}m${String(secs).padStart(2, '0')}s`;
 }
 
+// One wording of the speech-to-text caveat, shared by every prompt here. The
+// app carries the same sentence in Handoff.swift (`asrCaveat`). These two
+// strings are the handoff contract in prose: keep them in step.
+const ASR_CAVEAT = "It's speech-to-text, so it's messy: unreliable punctuation, garbled technical terms, and 'me'/'them' labels that can be wrong. Read for intent, not literal wording.";
+
 function taskInstructions() {
   return `Read the transcript below and work out what this meeting asks of me. Before changing anything, give me:
 
@@ -67,7 +72,32 @@ function taskInstructions() {
 3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
 4. Anything discussed that the current project may already do or contradict.
 
-It's speech-to-text, so it's messy: unreliable punctuation, garbled technical terms, and possibly incorrect speaker labels. Read for intent, not literal wording. Don't edit anything until we've agreed the list.`;
+${ASR_CAVEAT} Don't edit anything until we've agreed the list.`;
+}
+
+// Prompt for the browser doors. It never names the attached file, because
+// chatgpt.com renames a pasted file to a UUID and strips the extension. The
+// app carries the same text in Handoff.swift (`webPrompt`).
+function webPrompt(session) {
+  return `The attached file is the transcript of a meeting I just had (${session.duration}, machine-transcribed on-device). Read it, work out what it asks of me, then give me:
+
+1. Concrete work items it implies, ordered by what should happen first.
+2. Anything stated as a decision or constraint I shouldn't relitigate.
+3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
+
+${ASR_CAVEAT}`;
+}
+
+// The handoff file next to the session, or in a temp directory for a
+// transcript that came from --file or stdin and has no session folder. The
+// clipboard refers to this path, so it has to outlive this process.
+function writeHandoffFile(session) {
+  const dir = session.dir
+    ? session.dir
+    : fs.mkdtempSync(path.join(os.tmpdir(), 'patchthrough-'));
+  const target = path.join(dir, session.dir ? 'handoff.md' : `${session.name}.md`);
+  if (!fs.existsSync(target)) fs.writeFileSync(target, session.document);
+  return target;
 }
 
 function buildHandoffDocument(session) {
@@ -86,8 +116,8 @@ ${taskInstructions()}
 ## Recording
 
 - Duration: ${session.duration}${truncation}
-- Speakers: \`me\` normally means this machine's microphone; \`them\` normally means the audio the machine played. Treat these as channels, not verified identities.
-- Transcribed on-device. **Expect transcription errors**, especially in proper nouns, identifiers, and technical terms.
+- Speakers: \`me\` is this machine's microphone. \`them\` is the audio the Mac played, which is the other side of the call. These are channels, not verified identities: echo can put the wrong label on a line.
+- Transcribed on-device. **Expect transcription errors**, especially in proper nouns, identifiers and technical terms. If a term looks wrong but is phonetically close to something plausible, it probably is that.
 - Source: \`${session.sourcePath}\`
 
 ## Transcript
@@ -241,7 +271,7 @@ function stageSession(session, repo) {
 
 function promptFor(session, stagedPath) {
   const relative = path.join('.meeting', path.basename(stagedPath));
-  return `Read ${relative}. That file is the transcript of a meeting relevant to this repository.
+  return `Read ${relative}. That file is the transcript of a meeting about this codebase.
 
 Work out what it asks of this codebase, then tell me before changing anything:
 
@@ -250,7 +280,7 @@ Work out what it asks of this codebase, then tell me before changing anything:
 3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
 4. Anything discussed that the code already does, or already contradicts.
 
-It's speech-to-text, so read for intent rather than literal wording. Don't edit anything until we've agreed the list.`;
+${ASR_CAVEAT} Don't edit anything until we've agreed the list.`;
 }
 
 function executableCandidates(name, env = process.env) {
@@ -289,6 +319,111 @@ function copyToClipboard(text) {
   return result.status === 0;
 }
 
+// The chat websites whose composer takes a pasted file. The app carries the
+// same table in Handoff.swift (`knownGuiTargets`); keep the two in step.
+// `uploadsToCloud` marks a site that copies the attachment off the machine.
+const WEB_TARGETS = {
+  claude: {
+    label: 'Claude (web)',
+    newChatURL: 'https://claude.ai/new',
+    prefillsPrompt: true,
+    uploadsToCloud: false,
+  },
+  chatgpt: {
+    label: 'ChatGPT (web)',
+    newChatURL: 'https://chatgpt.com/',
+    prefillsPrompt: true,
+    uploadsToCloud: false,
+  },
+  m365: {
+    label: 'Microsoft 365 Copilot (web)',
+    newChatURL: 'https://m365.cloud.microsoft/chat/',
+    prefillsPrompt: false,
+    uploadsToCloud: true,
+  },
+};
+
+// Percent-encode down to alphanumerics. `encodeURIComponent` leaves `'()*~!.-_`
+// raw, which is a different byte string than the app sends. These sites read
+// the query with URLSearchParams, which also turns `+` into a space.
+function pctEncoded(value) {
+  return [...value]
+    .map((ch) => (/^[A-Za-z0-9]$/.test(ch)
+      ? ch
+      : [...Buffer.from(ch, 'utf8')]
+        .map((b) => `%${b.toString(16).toUpperCase().padStart(2, '0')}`)
+        .join('')))
+    .join('');
+}
+
+// Put a file on the clipboard as a reference, not as text, so a paste into a
+// chat composer attaches the file. The path goes through argv rather than a
+// script literal, because transcript-derived text must never reach a parser
+// as code. AppleScript exits 0 and empties the clipboard for a path that does
+// not exist, so check first and verify after.
+function copyFileToClipboard(filePath) {
+  if (process.platform !== 'darwin') return false;
+  if (!fs.existsSync(filePath)) return false;
+  const script = 'on run argv\nset the clipboard to POSIX file (item 1 of argv)\nend run';
+  if (spawnSync('/usr/bin/osascript', ['-e', script, filePath]).status !== 0) return false;
+  const info = spawnSync('/usr/bin/osascript', ['-e', 'clipboard info'], { encoding: 'utf8' });
+  return (info.stdout || '').includes('furl');
+}
+
+// The browser that receives the paste. A plain https URL opens in whichever
+// browser macOS chose, so the keystrokes have to go to that one.
+function defaultBrowserName() {
+  if (process.platform !== 'darwin') return null;
+  const script = 'use framework "AppKit"\n'
+    + 'set ws to current application\'s NSWorkspace\'s sharedWorkspace()\n'
+    + 'set u to current application\'s NSURL\'s URLWithString:"https://example.com"\n'
+    + 'set appURL to ws\'s URLForApplicationToOpenURL:u\n'
+    + 'return (appURL\'s lastPathComponent()) as text';
+  const result = spawnSync('/usr/bin/osascript', ['-e', script], { encoding: 'utf8' });
+  if (result.status !== 0) return null;
+  const name = (result.stdout || '').trim().replace(/\.app$/, '');
+  return name || null;
+}
+
+// Finish the handoff with a synthesized paste. Unlike the app, an npm CLI has
+// no signed bundle, so macOS attributes Accessibility to the terminal that ran
+// this command. Without that grant the keystroke silently does nothing and
+// osascript still exits 0, so this refuses to try rather than claim success.
+function autoPasteIntoBrowser(browser, settleSeconds = 5) {
+  if (process.platform !== 'darwin') return false;
+  const trusted = spawnSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e',
+    'ObjC.import("ApplicationServices"); $.AXIsProcessTrusted()'], { encoding: 'utf8' });
+  if ((trusted.stdout || '').trim() !== 'true') return false;
+  const script = `delay ${settleSeconds}\n`
+    + `tell application "${browser}" to activate\n`
+    + 'delay 0.4\n'
+    + 'tell application "System Events" to keystroke "v" using command down';
+  return spawnSync('/usr/bin/osascript', ['-e', script]).status === 0;
+}
+
+// Open a chat website with the transcript on the clipboard. Returns what the
+// caller must tell the user, because the outcome varies by site and by grant.
+function handToWeb(siteName, session, options = {}) {
+  const site = WEB_TARGETS[siteName];
+  if (!site) {
+    throw new Error(`unknown web target '${siteName}'. Try: ${Object.keys(WEB_TARGETS).join(', ')}`);
+  }
+  if (process.platform !== 'darwin') {
+    throw new Error('web handoffs need macOS, because they use the macOS clipboard');
+  }
+  const file = writeHandoffFile(session);
+  const attached = copyFileToClipboard(file);
+  let url = site.newChatURL;
+  if (site.prefillsPrompt) {
+    url += `${url.includes('?') ? '&' : '?'}q=${pctEncoded(webPrompt(session))}`;
+  }
+  spawnSync('/usr/bin/open', [url]);
+  const pasted = attached && options.autoPaste !== false
+    ? autoPasteIntoBrowser(defaultBrowserName() || 'Safari')
+    : false;
+  return { site, file, attached, pasted };
+}
+
 function launchAgent(name, prompt, cwd, env = process.env) {
   const definition = KNOWN_AGENTS[name];
   if (!definition) throw new Error(`unknown agent '${name}'`);
@@ -313,7 +448,14 @@ function launchAgent(name, prompt, cwd, env = process.env) {
 
 module.exports = {
   KNOWN_AGENTS,
+  WEB_TARGETS,
   buildHandoffDocument,
+  copyFileToClipboard,
+  defaultBrowserName,
+  handToWeb,
+  pctEncoded,
+  webPrompt,
+  writeHandoffFile,
   expandHome,
   findExecutable,
   formatDuration,

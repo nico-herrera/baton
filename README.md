@@ -94,7 +94,14 @@ patchthrough hand [agent]           # hand the newest transcript to an agent, he
 patchthrough hand claude -s <session> -d <repo> -n
 patchthrough transcripts            # list sessions: length, status, first line
 patchthrough hand codex --file meeting.md
+patchthrough hand --web claude      # open a chat site, transcript on the clipboard
 ```
+
+`--web claude`, `--web chatgpt` and `--web m365` need macOS, because they use the macOS
+clipboard. They need no repository and no installed app. One paste (⌘V) attaches the
+transcript. The CLI cannot paste for you as reliably as the app can: macOS gives
+Accessibility to the terminal that runs the command, not to Patchthrough, so without
+that grant the CLI tells you to paste instead of pretending it did.
 
 The CLI reads the sessions that the app writes. It also accepts any transcript file or
 input on stdin, so you can use the CLI without the app. See [`cli/`](cli/) for the full
@@ -142,6 +149,19 @@ menu bar. Each app gets the best entry point that the app exposes:
 | `codex` | The ChatGPT app opens. The handoff file goes to the clipboard, and the paste attaches it |
 | `kimi` | The Kimi app opens with the same clipboard payload |
 | `m365-copilot` | The Microsoft 365 Copilot app opens with the prompt and transcript on the clipboard as **text**. Its composer ignores file pastes and synthesized keystrokes, so paste (⌘V) yourself |
+| `web-claude` | claude.ai opens a new chat in your browser with the prompt prefilled. The paste attaches the transcript |
+| `web-chatgpt` | chatgpt.com opens the same way |
+| `web-m365` | m365.cloud.microsoft opens a new chat. This is the only way to attach a file to M365 Copilot, because the desktop app drops one. **Microsoft copies the attachment to your work OneDrive**, so Patchthrough asks first |
+
+**Web destinations** need no installed app, only a browser. They put `handoff.md` on the
+clipboard as a file, open the site, and one paste attaches it. Patchthrough pastes into
+whichever browser macOS opens, and waits longer than it does for an app, because the
+page has to load first. A site that interrupts with a banner can swallow the paste; the
+file stays on the clipboard, so press ⌘V again.
+
+The web prompt never names the file. chatgpt.com renames a pasted file to a random
+identifier and drops the extension, so an instruction to read `handoff.md` would send
+the agent looking for a file it cannot see.
 
 The Claude CLI is a separate destination. It is `claude` **without** `--gui`, and the
 menu calls it **Claude Code**.

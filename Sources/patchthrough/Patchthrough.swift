@@ -112,15 +112,19 @@ struct Hand: ParsableCommand {
             switch target.kind {
             case .appClipboard(let appName): paste = (appName, true)
             case .claudeChat: paste = ("Claude", false)
+            case .webChat: paste = (Handoff.defaultBrowserName() ?? "Safari", false)
             default: paste = nil
             }
+            // A page has to load before it can take a paste.
+            var settle = 1.2
+            if case .webChat = target.kind { settle = 5 }
             if let paste {
                 if !Config.autoPaste() || target.manualTextPaste {
                     FileHandle.standardError.write(Data(target.manualTextPaste
                         ? "prompt + transcript are on your clipboard. Paste (⌘V) into the chat\n".utf8
                         : "the handoff file is on your clipboard. Paste (⌘V) into a new chat to attach it\n".utf8
                     ))
-                } else if !Handoff.autoPaste(app: paste.app, newChat: paste.newChat) {
+                } else if !Handoff.autoPaste(app: paste.app, newChat: paste.newChat, settle: settle) {
                     FileHandle.standardError.write(Data("""
                     couldn't paste into \(paste.app). The handoff file is on your clipboard: \
                     press \(paste.newChat ? "⌘N then ⌘V" : "⌘V").
@@ -478,8 +482,9 @@ final class AppController: NSObject, NSApplicationDelegate {
         let latest = store.items.first { $0.status == .ready }
         menuBar.apply(.init(
             mostUsed: top3.map(entry),
-            terminal: rest.filter(\.isTerminal).map(entry),
-            app: rest.filter { !$0.isTerminal }.map(entry),
+            terminal: rest.filter { $0.category == .terminal }.map(entry),
+            app: rest.filter { $0.category == .app }.map(entry),
+            web: rest.filter { $0.category == .web }.map(entry),
             top: top3.first.map(entry),
             latestTimeLabel: latest?.date.map { $0.formatted(date: .omitted, time: .shortened) }
                 ?? latest?.id,
@@ -506,6 +511,10 @@ final class AppController: NSObject, NSApplicationDelegate {
                    !HandoffAlert.confirmManualPaste(app: appName) {
                     return
                 }
+                if case .webChat(let site) = target.kind, site.uploadsToCloud,
+                   !HandoffAlert.confirmCloudUpload(site: target.label) {
+                    return
+                }
                 Handoff.launchGui(target: target, session: session, repo: nil)
                 switch target.kind {
                 case .appClipboard(let appName):
@@ -529,6 +538,17 @@ final class AppController: NSObject, NSApplicationDelegate {
                         notifyUser(
                             title: "Patchthrough: handed to Claude",
                             body: "New chat opened. Paste (⌘V) to attach the transcript."
+                        )
+                    }
+                case .webChat:
+                    // A page has to load before it can take a paste, so the
+                    // browser gets longer to settle than an app does.
+                    if let browser = Handoff.defaultBrowserName(), Config.autoPaste() {
+                        finishPaste(app: browser, newChat: false, settle: 5)
+                    } else {
+                        notifyUser(
+                            title: "Patchthrough: handed to \(target.label)",
+                            body: "The handoff file is on your clipboard. Paste (⌘V) to attach it."
                         )
                     }
                 default: break
@@ -567,9 +587,11 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// The paste script sleeps about two seconds while the app comes up, so it
     /// runs off the main actor. Otherwise the menu-bar app stops responding
     /// for the duration of every clipboard handoff.
-    private func finishPaste(app: String, newChat: Bool) {
+    private func finishPaste(app: String, newChat: Bool, settle: Double = 1.2) {
         Task {
-            let pasted = await Task.detached { Handoff.autoPaste(app: app, newChat: newChat) }.value
+            let pasted = await Task.detached {
+                Handoff.autoPaste(app: app, newChat: newChat, settle: settle)
+            }.value
             guard !pasted else { return }
             HandoffAlert.showPasteFailed(app: app)
         }

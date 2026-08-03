@@ -5,6 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const {
   KNOWN_AGENTS,
+  WEB_TARGETS,
+  handToWeb,
   installedAgents,
   launchAgent,
   listSessions,
@@ -13,6 +15,8 @@ const {
   resolveRecordingsRoot,
   resolveSession,
   stageSession,
+  webPrompt,
+  writeHandoffFile,
 } = require('../src/patchthrough');
 const packageJson = require('../package.json');
 
@@ -31,10 +35,17 @@ Hand options:
   -f, --file <path|->        any transcript file, or - for stdin
   -d, --dir <repository>     repository to stage into (default: current)
   -n, --no-launch            stage and print the prompt without launching
+  -w, --web <site>           open a chat website instead of a terminal agent
       --recordings-dir <dir> override the app's recordings directory
 
 Agents:
   ${Object.keys(KNOWN_AGENTS).join(', ')}
+
+Web sites (macOS only, with --web):
+  ${Object.keys(WEB_TARGETS).join(', ')}
+
+A web handoff puts handoff.md on the clipboard as a file and opens the site.
+One paste (⌘V) attaches the transcript.
 `;
 
 function parse(argv) {
@@ -44,6 +55,7 @@ function parse(argv) {
     ['-s', 'session'], ['--session', 'session'],
     ['-f', 'file'], ['--file', 'file'],
     ['-d', 'dir'], ['--dir', 'dir'],
+    ['-w', 'web'], ['--web', 'web'],
     ['--recordings-dir', 'recordingsDir'],
   ]);
   const booleans = new Map([
@@ -138,9 +150,13 @@ function main() {
   if (positional.length > 2) throw new Error('hand accepts at most one agent');
 
   const agent = positional[1];
-  if (!agent && !options.noLaunch) {
+  if (options.web && agent) {
+    throw new Error('use either --web or an agent, not both');
+  }
+  if (!agent && !options.web && !options.noLaunch) {
     printAgents();
     console.log('\nusage: patchthrough hand <agent> [options]');
+    console.log(`       patchthrough hand --web <${Object.keys(WEB_TARGETS).join('|')}>`);
     return 0;
   }
   if (agent && !KNOWN_AGENTS[agent]) {
@@ -150,6 +166,35 @@ function main() {
   const session = options.file
     ? readExternalTranscript(options.file)
     : resolveSession(root, options.session);
+
+  // A web handoff needs no repository: the transcript rides on the clipboard
+  // as a file, and handoff.md carries the instructions.
+  if (options.web) {
+    const site = WEB_TARGETS[options.web];
+    if (!site) {
+      throw new Error(`unknown web target '${options.web}'; expected ${Object.keys(WEB_TARGETS).join(', ')}`);
+    }
+    if (site.uploadsToCloud) {
+      process.stderr.write(
+        `⚠ ${site.label} copies an attached file to your work OneDrive, so this transcript leaves this Mac\n`
+      );
+    }
+    if (options.noLaunch) {
+      const file = writeHandoffFile(session);
+      process.stderr.write(`wrote ${file}\n`);
+      console.log(`\n${webPrompt(session)}`);
+      return 0;
+    }
+    const result = handToWeb(options.web, session);
+    process.stderr.write(`→ ${site.label}\n`);
+    if (!result.attached) {
+      process.stderr.write(`could not put ${result.file} on the clipboard. Drag it into the page instead\n`);
+    } else if (!result.pasted) {
+      process.stderr.write('the transcript is on your clipboard as a file. Press ⌘V in the page to attach it\n');
+    }
+    return 0;
+  }
+
   const repo = path.resolve(options.dir || process.cwd());
   const staged = stageSession(session, repo);
   const prompt = promptFor(session, staged);

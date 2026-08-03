@@ -8,6 +8,7 @@ enum HandoffAlert {
     private static let accessibilitySettings =
         "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
     private static let manualPasteSuppressKey = "handoff.manualPasteExplainerSuppressed"
+    private static let cloudUploadSuppressKey = "handoff.cloudUploadWarningSuppressed"
 
     /// Shown when a clipboard handoff opened the app but the ⌘N+⌘V paste
     /// failed, which almost always means patchthrough has no Accessibility
@@ -60,6 +61,37 @@ enum HandoffAlert {
         let response = alert.runModal()
         if alert.suppressionButton?.state == .on {
             defaults.set(true, forKey: manualPasteSuppressKey)
+        }
+        return response == .alertFirstButtonReturn
+    }
+
+    /// Shown before a handoff to a site that copies the attachment into cloud
+    /// storage. Patchthrough keeps recordings on the machine, so the one door
+    /// that breaks that has to say so first. Returns false when the user
+    /// cancels.
+    static func confirmCloudUpload(site: String) -> Bool {
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: cloudUploadSuppressKey) { return true }
+
+        let alert = NSAlert()
+        alert.messageText = "\(site) copies the transcript to the cloud"
+        alert.informativeText = """
+        Microsoft puts a file that you attach in your work OneDrive, so this \
+        transcript leaves your Mac. Every other destination keeps it here.
+
+        The recording and the audio stay on this machine either way. Only the \
+        attached transcript is copied.
+        """
+        alert.alertStyle = .warning
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "Don't ask again for this destination"
+        alert.addButton(withTitle: "Attach and Continue")
+        alert.addButton(withTitle: "Cancel")
+
+        NSApp.activate(ignoringOtherApps: true)
+        let response = alert.runModal()
+        if alert.suppressionButton?.state == .on {
+            defaults.set(true, forKey: cloudUploadSuppressKey)
         }
         return response == .alertFirstButtonReturn
     }
