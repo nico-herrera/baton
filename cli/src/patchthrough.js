@@ -59,6 +59,11 @@ function formatDuration(seconds) {
     : `${minutes}m${String(secs).padStart(2, '0')}s`;
 }
 
+// One wording of the speech-to-text caveat, shared by every prompt here. The
+// app carries the same sentence in Handoff.swift (`asrCaveat`). These two
+// strings are the handoff contract in prose: keep them in step.
+const ASR_CAVEAT = "It's speech-to-text, so it's messy: unreliable punctuation, garbled technical terms, and 'me'/'them' labels that can be wrong. Read for intent, not literal wording.";
+
 function taskInstructions() {
   return `Read the transcript below and work out what this meeting asks of me. Before changing anything, give me:
 
@@ -67,7 +72,7 @@ function taskInstructions() {
 3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
 4. Anything discussed that the current project may already do or contradict.
 
-It's speech-to-text, so it's messy: unreliable punctuation, garbled technical terms, and possibly incorrect speaker labels. Read for intent, not literal wording. Don't edit anything until we've agreed the list.`;
+${ASR_CAVEAT} Don't edit anything until we've agreed the list.`;
 }
 
 function buildHandoffDocument(session) {
@@ -86,8 +91,8 @@ ${taskInstructions()}
 ## Recording
 
 - Duration: ${session.duration}${truncation}
-- Speakers: \`me\` normally means this machine's microphone; \`them\` normally means the audio the machine played. Treat these as channels, not verified identities.
-- Transcribed on-device. **Expect transcription errors**, especially in proper nouns, identifiers, and technical terms.
+- Speakers: \`me\` is this machine's microphone. \`them\` is the audio the Mac played, which is the other side of the call. These are channels, not verified identities: echo can put the wrong label on a line.
+- Transcribed on-device. **Expect transcription errors**, especially in proper nouns, identifiers and technical terms. If a term looks wrong but is phonetically close to something plausible, it probably is that.
 - Source: \`${session.sourcePath}\`
 
 ## Transcript
@@ -241,7 +246,7 @@ function stageSession(session, repo) {
 
 function promptFor(session, stagedPath) {
   const relative = path.join('.meeting', path.basename(stagedPath));
-  return `Read ${relative}. That file is the transcript of a meeting relevant to this repository.
+  return `Read ${relative}. That file is the transcript of a meeting about this codebase.
 
 Work out what it asks of this codebase, then tell me before changing anything:
 
@@ -250,7 +255,7 @@ Work out what it asks of this codebase, then tell me before changing anything:
 3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
 4. Anything discussed that the code already does, or already contradicts.
 
-It's speech-to-text, so read for intent rather than literal wording. Don't edit anything until we've agreed the list.`;
+${ASR_CAVEAT} Don't edit anything until we've agreed the list.`;
 }
 
 function executableCandidates(name, env = process.env) {

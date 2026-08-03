@@ -332,6 +332,15 @@ enum Handoff {
 
     /// Prompt the chat deeplink prefills in the composer. The transcript
     /// arrives separately, as an attached handoff.md.
+    /// One wording of the speech-to-text caveat. Every prompt includes it, so
+    /// a change lands in all of them instead of drifting per prompt. The CLI
+    /// in `cli/` carries the same sentence; keep the two in step.
+    static let asrCaveat = """
+    It's speech-to-text, so it's messy: unreliable punctuation, garbled \
+    technical terms, and 'me'/'them' labels that can be wrong. Read for \
+    intent, not literal wording.
+    """
+
     static func chatPrompt(for session: Session) -> String {
         """
         The attached handoff.md is the transcript of a meeting I just had \
@@ -342,9 +351,7 @@ enum Handoff {
         2. Anything stated as a decision or constraint I shouldn't relitigate.
         3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
 
-        It's speech-to-text, so it's messy: unreliable punctuation, garbled \
-        technical terms, 'me' and 'them' instead of names. Read for intent, \
-        not literal wording.
+        \(asrCaveat)
         """
     }
 
@@ -361,9 +368,7 @@ enum Handoff {
         3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
         4. Anything discussed that the current project may already do or contradict.
 
-        It's speech-to-text, so it's messy: unreliable punctuation, garbled \
-        technical terms, 'me'/'them' instead of names. Read for intent, not \
-        literal wording. Don't edit anything until we've agreed the list.
+        \(asrCaveat) Don't edit anything until we've agreed the list.
         """
     }
 
@@ -506,8 +511,9 @@ enum Handoff {
         ## Recording
 
         - Duration: \(session.duration)\(truncationNote)
-        - Speakers: `me` = this machine's microphone. `them` = everything the Mac \
-        played, i.e. the other side of the call. Not real names.
+        - Speakers: `me` is this machine's microphone. `them` is the audio the Mac \
+        played, which is the other side of the call. These are channels, not \
+        verified identities: echo can put the wrong label on a line.
         - Transcribed on-device. **Expect transcription errors**, especially in \
         proper nouns, identifiers and technical terms. If a term looks wrong but is \
         phonetically close to something plausible, it probably is that.
@@ -546,7 +552,7 @@ enum Handoff {
 
     static func prompt(for session: Session) -> String {
         """
-        Read .meeting/\(session.name).md. That file is the transcript of a meeting I just had in this repo.
+        Read .meeting/\(session.name).md. That file is the transcript of a meeting about this codebase.
 
         Work out what it asks of this codebase, then tell me before changing anything:
 
@@ -555,9 +561,7 @@ enum Handoff {
         3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
         4. Anything discussed that the code already does, or already contradicts.
 
-        It's speech-to-text, so it's messy: unreliable punctuation, garbled technical \
-        terms, 'me'/'them' instead of names. Read for intent, not literal wording. \
-        Don't edit anything until we've agreed the list.
+        \(asrCaveat) Don't edit anything until we've agreed the list.
         """
     }
 
