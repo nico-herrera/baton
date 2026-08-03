@@ -48,12 +48,14 @@ public sealed class ParakeetEngine(ModelStore? models = null, int threads = 0) :
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<Segment>> TranscribeAsync(
+    public Task<EngineTranscript> TranscribeAsync(
         string audioPath,
+        TranscriptionContext context,
         CancellationToken cancellationToken = default)
     {
         if (_recognizer is null) throw new InvalidOperationException("the parakeet engine was used before PrepareAsync");
 
+        var started = System.Diagnostics.Stopwatch.StartNew();
         var samples = ReadMono16k(audioPath);
         // An empty track means the recorder died before its first buffer. The
         // pipeline logs a skipped track, which is better than a zero-segment
@@ -66,15 +68,34 @@ public sealed class ParakeetEngine(ModelStore? models = null, int threads = 0) :
         var result = stream.Result;
 
         var words = Segmentation.WordsFromTokens(result.Tokens, result.Timestamps, result.Durations);
-        if (words.Count == 0)
+        var text = string.Join(" ", (result.Text ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        IReadOnlyList<EngineSegment> segments = words.Count == 0
+            ? text.Length == 0 ? [] : [new EngineSegment(0, (int)(samples.Length * 1000.0 / SampleRate), text, null, [])]
+            : Segmentation.From(words);
+        started.Stop();
+        var requested = context.Vocabulary.Select(term => term.Text).ToList();
+        var detected = requested.Where(term => text.Contains(term, StringComparison.OrdinalIgnoreCase)).ToList();
+        var transcript = new EngineTranscript
         {
-            var text = (result.Text ?? "").Trim();
-            IReadOnlyList<Segment> whole = text.Length == 0
-                ? []
-                : [new Segment("", 0, (int)(samples.Length * 1000.0 / SampleRate), text)];
-            return Task.FromResult(whole);
-        }
-        return Task.FromResult<IReadOnlyList<Segment>>(Segmentation.From(words));
+            Engine = Name,
+            Model = Model,
+            Version = "sherpa-onnx-1.13.4",
+            Settings = new Dictionary<string, string>
+            {
+                ["decoder"] = "greedy_search",
+                ["sample_rate_hz"] = SampleRate.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["quality_mode"] = context.QualityMode == QualityMode.MaxAccuracy ? "max_accuracy" : "standard",
+            },
+            Text = text,
+            Language = "en",
+            AudioDurationMs = (int)(samples.Length * 1000.0 / SampleRate),
+            ProcessingDurationMs = (int)started.ElapsedMilliseconds,
+            Words = segments.SelectMany(segment => segment.Words).ToList(),
+            Segments = segments,
+            Diagnostics = new Dictionary<string, string> { ["runtime"] = "sherpa-onnx-cpu" },
+            Context = new EngineContextEvidence(requested, detected, []),
+        };
+        return Task.FromResult(transcript);
     }
 
     /// <summary>

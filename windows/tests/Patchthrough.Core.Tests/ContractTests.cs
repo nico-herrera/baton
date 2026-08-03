@@ -24,8 +24,8 @@ public sealed class ContractTests : IDisposable
         CreatedAt = new DateTimeOffset(2026, 8, 3, 14, 5, 0, TimeSpan.Zero),
         Segments =
         [
-            new Segment("me", 1000, 2500, "Ship the Windows recorder."),
-            new Segment("them", 5000, 7000, "Agreed, after the CLI lands."),
+            new Segment("me", 1000, 2500, "Ship the Windows recorder.", 0.95, SourceTrack: "mic", AppliedVocabulary: []),
+            new Segment("them", 5000, 7000, "Agreed, after the CLI lands.", 0.94, SourceTrack: "system", AppliedVocabulary: []),
         ],
     };
 
@@ -63,8 +63,12 @@ public sealed class ContractTests : IDisposable
         Assert.Equal("parakeet", (string?)root["engine"]);
         Assert.Equal("parakeet-tdt-0.6b-v2", (string?)root["model"]);
         Assert.Equal("2026-08-03T14:05:00Z", (string?)root["created_at"]);
+        Assert.Equal(2, (int?)root["pipeline_version"]);
+        Assert.Equal("standard", (string?)root["quality_mode"]);
         var first = root["segments"]!.AsArray()[0]!.AsObject();
-        Assert.Equal(["end_ms", "speaker", "start_ms", "text"], first.Select(pair => pair.Key));
+        Assert.Equal(
+            ["applied_vocabulary", "confidence", "end_ms", "speaker", "source_track", "start_ms", "text"],
+            first.Select(pair => pair.Key));
         Assert.Equal("me", (string?)first["speaker"]);
         Assert.Equal(1000, (int?)first["start_ms"]);
     }

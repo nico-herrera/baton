@@ -44,10 +44,20 @@ enum Config {
         transcription()?["enabled"] as? Bool ?? true
     }
 
-    /// Configured engine name. Only "parakeet" ships today; the coordinator
-    /// warns and falls back for anything else.
+    /// `auto` lets the evidence profile choose the best qualifying engine.
     static func transcriptionEngine() -> String {
-        transcription()?["engine"] as? String ?? "parakeet"
+        transcription()?["engine"] as? String ?? "auto"
+    }
+
+    static func transcriptionQualityMode() -> QualityMode {
+        guard let raw = transcription()?["quality_mode"] as? String,
+              let mode = QualityMode(rawValue: raw) else { return .standard }
+        return mode
+    }
+
+    static func transcriptionProjectDir() -> URL? {
+        guard let path = transcription()?["project_dir"] as? String, !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
     }
 
     /// Drop mic segments that duplicate the system track. Speech from the

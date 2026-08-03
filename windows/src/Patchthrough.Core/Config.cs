@@ -56,7 +56,21 @@ public sealed class Config
 
     public bool TranscriptionEnabled => NestedBool("transcription", "enabled") ?? true;
 
-    public string TranscriptionEngine => NestedString("transcription", "engine") ?? "parakeet";
+    public string TranscriptionEngine => NestedString("transcription", "engine") ?? "auto";
+
+    public QualityMode TranscriptionQualityMode =>
+        string.Equals(NestedString("transcription", "quality_mode"), "max_accuracy", StringComparison.Ordinal)
+            ? QualityMode.MaxAccuracy
+            : QualityMode.Standard;
+
+    public string? TranscriptionProjectDirectory
+    {
+        get
+        {
+            var configured = NestedString("transcription", "project_dir");
+            return configured is null ? null : ExpandHome(configured);
+        }
+    }
 
     public bool MicVoiceProcessing => Bool("mic_voice_processing") ?? false;
 

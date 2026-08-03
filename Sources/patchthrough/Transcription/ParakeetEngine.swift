@@ -34,7 +34,7 @@ actor ParakeetEngine: TranscriptionEngine {
         self.manager = manager
     }
 
-    func transcribe(_ audio: URL) async throws -> [TranscriptSegment] {
+    func transcribe(_ audio: URL, context: TranscriptionContext) async throws -> EngineTranscript {
         guard let manager else { throw EngineError.notPrepared }
 
         // A track with no frames (recorder died before its first buffer)
@@ -52,15 +52,50 @@ actor ParakeetEngine: TranscriptionEngine {
 
         var state = try TdtDecoderState()
         let result = try await manager.transcribe(audio, decoderState: &state)
-
-        let words = buildWordTimings(from: result.tokenTimings ?? [])
-        guard !words.isEmpty else {
-            let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return text.isEmpty
-                ? []
-                : [TranscriptSegment(start: 0, end: result.duration, text: text)]
+        let words = Self.words(from: result.tokenTimings ?? [])
+        let text = TranscriptSegmentation.normalizedText(result.text)
+        let segments: [TranscriptSegment]
+        if words.isEmpty {
+            segments = text.isEmpty ? [] : [TranscriptSegment(
+                startMs: 0,
+                endMs: Int(result.duration * 1000),
+                text: text,
+                confidence: Double(result.confidence),
+                words: []
+            )]
+        } else {
+            segments = TranscriptSegmentation.segments(from: words)
         }
-        return Self.segments(from: words)
+
+        let requested = context.vocabulary.map(\.text)
+        let detected = requested.filter { term in
+            text.range(of: term, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        }
+        return EngineTranscript(
+            engine: name,
+            model: model,
+            version: "FluidAudio-0.15.5",
+            settings: [
+                "decoder": "tdt-greedy",
+                "sample_rate_hz": "16000",
+                "quality_mode": context.qualityMode.rawValue,
+            ],
+            text: text,
+            language: "en",
+            audioDurationMs: Int(result.duration * 1000),
+            processingDurationMs: Int(result.processingTime * 1000),
+            words: words,
+            segments: segments,
+            diagnostics: [
+                "rtfx": String(format: "%.3f", result.rtfx),
+                "result_confidence": String(format: "%.4f", result.confidence),
+            ],
+            context: EngineContextEvidence(
+                requestedTerms: requested,
+                detectedTerms: result.ctcDetectedTerms ?? detected,
+                appliedTerms: result.ctcAppliedTerms ?? []
+            )
+        )
     }
 
     func release() async {
@@ -68,36 +103,46 @@ actor ParakeetEngine: TranscriptionEngine {
         manager = nil
     }
 
-    /// Group word timings into readable segments: break on sentence-ending
-    /// punctuation (parakeet v2 emits punctuation), a silence gap, or a hard
-    /// length cap so a run-on speaker still wraps.
-    private static func segments(from words: [WordTiming]) -> [TranscriptSegment] {
-        var out: [TranscriptSegment] = []
-        var current: [WordTiming] = []
+    private static func words(from tokens: [TokenTiming]) -> [TimedWord] {
+        var words: [TimedWord] = []
+        var text = ""
+        var start: TimeInterval = 0
+        var end: TimeInterval = 0
+        var confidences: [Double] = []
 
         func flush() {
-            guard let first = current.first, let last = current.last else { return }
-            out.append(TranscriptSegment(
-                start: first.startTime,
-                end: last.endTime,
-                text: current.map(\.word).joined(separator: " ")
+            let trimmed = text.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { return }
+            words.append(TimedWord(
+                text: trimmed,
+                startMs: Int(start * 1000),
+                endMs: Int(end * 1000),
+                confidence: confidences.isEmpty ? nil : confidences.reduce(0, +) / Double(confidences.count)
             ))
-            current = []
         }
 
-        for word in words {
-            if let last = current.last, word.startTime - last.endTime > 1.0 {
+        for timing in tokens where !timing.token.isEmpty && timing.token != "<blank>" && timing.token != "<pad>" {
+            let token = timing.token
+            let startsWord = token.hasPrefix("▁") || token.hasPrefix(" ") || text.isEmpty
+            if startsWord && !text.isEmpty {
                 flush()
+                text = ""
+                confidences = []
             }
-            current.append(word)
-            let endsSentence = word.word.hasSuffix(".")
-                || word.word.hasSuffix("?")
-                || word.word.hasSuffix("!")
-            if endsSentence || current.count >= 60 {
-                flush()
+            if startsWord {
+                var cleaned = token
+                while cleaned.first == "▁" || cleaned.first == " " {
+                    cleaned.removeFirst()
+                }
+                text = cleaned
+                start = timing.startTime
+            } else {
+                text += token
             }
+            end = timing.endTime
+            confidences.append(Double(timing.confidence))
         }
         flush()
-        return out
+        return words
     }
 }

@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify shared contracts
+        run: node tools/verify-contracts.mjs
+      - name: Test CLI
+        working-directory: cli
+        run: npm test
+      - name: Build Swift app
+        run: swift build
+      - name: Test Swift contracts and pipeline
+        run: swift test
+
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Verify shared contracts
+        run: node tools/verify-contracts.mjs
+      - name: Test CLI
+        working-directory: cli
+        run: npm test
+      - name: Restore Windows solution
+        run: dotnet restore windows/Patchthrough.sln
+      - name: Build Windows solution
+        run: dotnet build windows/Patchthrough.sln -c Release --no-restore -warnaserror
+      - name: Test Windows pipeline
+        run: dotnet test windows/Patchthrough.sln -c Release --no-build
+      - name: Verify session contract
+        shell: pwsh
+        run: windows/verify-contract.ps1

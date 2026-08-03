@@ -5,8 +5,8 @@ namespace Patchthrough.Core.Tests;
 /// <summary>
 /// The line breaks of a transcript are a port of `segments(from:)` in
 /// ParakeetEngine.swift. A Windows transcript has to read like a macOS one, so
-/// these tests pin the three boundaries the macOS engine uses: a sentence end,
-/// a silence, and a hard word cap.
+/// these tests pin the natural boundaries both platforms use: punctuation,
+/// pauses, confidence changes, and a duration guard.
 /// </summary>
 public sealed class SegmentationTests
 {
@@ -36,7 +36,7 @@ public sealed class SegmentationTests
     }
 
     [Fact]
-    public void ASilenceLongerThanASecondBreaksASegment()
+    public void ASilenceLongerThanPointEightSecondsBreaksASegment()
     {
         // No punctuation anywhere, so only the gap can break these.
         var segments = Segmentation.From([
@@ -50,16 +50,16 @@ public sealed class SegmentationTests
     [Fact]
     public void AGapAtTheThresholdDoesNotBreakASegment()
     {
-        // Exactly one second is not "longer than" one second. The macOS engine
+        // Exactly 0.8 seconds is not "longer than" the threshold. The macOS engine
         // uses a strict comparison, and a transcript that splits differently
         // between platforms would be a real difference in output.
-        var segments = Segmentation.From([W("one", 0.0, 1.0), W("two", 2.0, 2.5)]);
+        var segments = Segmentation.From([W("one", 0.0, 1.0), W("two", 1.8, 2.5)]);
         Assert.Single(segments);
         Assert.Equal("one two", segments[0].Text);
     }
 
     [Fact]
-    public void ASpeakerWhoNeverPausesStillWraps()
+    public void AWordCountAloneNeverWraps()
     {
         var words = Enumerable.Range(0, 130)
             .Select(i => W($"w{i}", i * 0.1, i * 0.1 + 0.05))
@@ -67,10 +67,34 @@ public sealed class SegmentationTests
 
         var segments = Segmentation.From(words);
 
-        Assert.Equal(3, segments.Count);
-        Assert.Equal(Segmentation.MaxWords, segments[0].Text.Split(' ').Length);
-        Assert.Equal(Segmentation.MaxWords, segments[1].Text.Split(' ').Length);
-        Assert.Equal(10, segments[2].Text.Split(' ').Length);
+        Assert.Single(segments);
+        Assert.Equal(130, segments[0].Text.Split(' ').Length);
+    }
+
+    [Fact]
+    public void ARunOnSpeakerWrapsAtTheDurationGuard()
+    {
+        var words = Enumerable.Range(0, 650)
+            .Select(i => W($"w{i}", i * 0.1, i * 0.1 + 0.05))
+            .ToList();
+
+        var segments = Segmentation.From(words);
+
+        Assert.Equal([300, 300, 50], segments.Select(segment => segment.Words.Count));
+    }
+
+    [Fact]
+    public void AConfidenceCliffCreatesAReadableBoundary()
+    {
+        var segments = Segmentation.From([
+            new WordTiming("one", 0, 0.1, 0.95),
+            new WordTiming("two", 0.2, 0.3, 0.94),
+            new WordTiming("three", 0.4, 0.5, 0.93),
+            new WordTiming("four", 0.6, 0.7, 0.92),
+            new WordTiming("uncertain", 0.8, 1.0, 0.4),
+        ]);
+
+        Assert.Equal(["one two three four", "uncertain"], segments.Select(segment => segment.Text));
     }
 
     [Fact]

@@ -1,78 +1,80 @@
 namespace Patchthrough.Core;
 
-/// <summary>One word and when it was said, in seconds from the file start.</summary>
-public sealed record WordTiming(string Word, double Start, double End);
+/// <summary>One word and its engine-native confidence on the source clock.</summary>
+public sealed record WordTiming(string Word, double Start, double End, double? Confidence = null);
 
-/// <summary>
-/// Groups timed words into readable segments. This is a port of
-/// `segments(from:)` in ParakeetEngine.swift, so a Windows transcript breaks
-/// its lines the same way a macOS one does.
-/// </summary>
 public static class Segmentation
 {
-    /// <summary>A silence this long ends a segment.</summary>
-    public const double GapSeconds = 1.0;
+    public const double GapSeconds = 0.8;
+    public const double MaxDurationSeconds = 30;
+    public const double ConfidenceChange = 0.35;
 
-    /// <summary>A hard cap, so a speaker who never pauses still wraps.</summary>
-    public const int MaxWords = 60;
-
-    public static List<Segment> From(IReadOnlyList<WordTiming> words)
+    public static List<EngineSegment> From(IReadOnlyList<WordTiming> words)
     {
-        var output = new List<Segment>();
+        var output = new List<EngineSegment>();
         var current = new List<WordTiming>();
 
         void Flush()
         {
             if (current.Count == 0) return;
-            output.Add(new Segment(
-                "",
+            var scores = current.Where(w => w.Confidence.HasValue).Select(w => w.Confidence!.Value).ToList();
+            output.Add(new EngineSegment(
                 (int)(current[0].Start * 1000),
                 (int)(current[^1].End * 1000),
-                string.Join(" ", current.Select(w => w.Word))));
+                Normalize(string.Join(" ", current.Select(w => w.Word))),
+                scores.Count == 0 ? null : scores.Average(),
+                current.Select(w => new EngineWord(
+                    w.Word,
+                    (int)(w.Start * 1000),
+                    (int)(w.End * 1000),
+                    w.Confidence)).ToList()));
             current.Clear();
         }
 
-        foreach (var word in words)
+        foreach (var word in words.Where(w => !string.IsNullOrWhiteSpace(w.Word)))
         {
-            // A gap ends the previous segment before this word joins one.
-            if (current.Count > 0 && word.Start - current[^1].End > GapSeconds) Flush();
+            if (current.Count > 0)
+            {
+                var last = current[^1];
+                var confidenceShift = current.Count >= 4
+                    && last.Confidence.HasValue && word.Confidence.HasValue
+                    && Math.Abs(last.Confidence.Value - word.Confidence.Value) >= ConfidenceChange;
+                if (word.Start - last.End > GapSeconds
+                    || word.End - current[0].Start > MaxDurationSeconds
+                    || confidenceShift) Flush();
+            }
             current.Add(word);
-
-            // Parakeet emits punctuation, so a sentence end is a real boundary.
-            var endsSentence = word.Word.EndsWith('.') || word.Word.EndsWith('?') || word.Word.EndsWith('!');
-            if (endsSentence || current.Count >= MaxWords) Flush();
+            if (word.Word.EndsWith('.') || word.Word.EndsWith('?') || word.Word.EndsWith('!')) Flush();
         }
         Flush();
         return output;
     }
 
-    /// <summary>
-    /// Rebuild words from the sub-word tokens a transducer emits. Sentencepiece
-    /// marks the start of a word with U+2581, so a token carrying that mark
-    /// opens a new word and the rest attach to the current one.
-    /// </summary>
     public static List<WordTiming> WordsFromTokens(
         IReadOnlyList<string> tokens,
         IReadOnlyList<float> startSeconds,
-        IReadOnlyList<float>? durations = null)
+        IReadOnlyList<float>? durations = null,
+        IReadOnlyList<float>? confidences = null)
     {
         var words = new List<WordTiming>();
         var text = new System.Text.StringBuilder();
+        var wordScores = new List<double>();
         double start = 0, end = 0;
 
         void Flush()
         {
             if (text.Length == 0) return;
-            words.Add(new WordTiming(text.ToString(), start, end));
+            words.Add(new WordTiming(
+                text.ToString(), start, end,
+                wordScores.Count == 0 ? null : wordScores.Average()));
             text.Clear();
+            wordScores.Clear();
         }
 
         for (var i = 0; i < tokens.Count && i < startSeconds.Count; i++)
         {
             var token = tokens[i];
             var tokenStart = startSeconds[i];
-            // Without durations, a token ends where the next one starts. The
-            // last token falls back to its own start.
             var tokenEnd = durations is not null && i < durations.Count
                 ? tokenStart + durations[i]
                 : i + 1 < startSeconds.Count ? startSeconds[i + 1] : tokenStart;
@@ -88,9 +90,14 @@ public static class Segmentation
                 if (text.Length == 0) start = tokenStart;
                 text.Append(token);
             }
+            if (confidences is not null && i < confidences.Count)
+                wordScores.Add(Math.Clamp(confidences[i], 0, 1));
             end = Math.Max(tokenEnd, tokenStart);
         }
         Flush();
         return words.Where(w => w.Word.Length > 0).ToList();
     }
+
+    private static string Normalize(string text) =>
+        string.Join(" ", text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 }

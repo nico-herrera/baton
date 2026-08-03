@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchthrough.dev/schemas/transcript-v2.schema.json",
+  "title": "Patchthrough canonical transcript",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pipeline_version", "engine", "model", "quality_mode", "created_at", "segments"],
+  "properties": {
+    "pipeline_version": {"const": 2},
+    "engine": {"type": "string", "minLength": 1},
+    "model": {"type": "string", "minLength": 1},
+    "quality_mode": {"enum": ["standard", "max_accuracy"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "segments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["speaker", "source_track", "start_ms", "end_ms", "text"],
+        "properties": {
+          "speaker": {"enum": ["me", "them"]},
+          "source_track": {"enum": ["mic", "system"]},
+          "start_ms": {"type": "integer", "minimum": 0},
+          "end_ms": {"type": "integer", "minimum": 0},
+          "text": {"type": "string"},
+          "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+          "applied_vocabulary": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}

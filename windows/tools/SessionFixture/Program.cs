@@ -43,18 +43,35 @@ internal sealed class StubEngine : ITranscriptionEngine
 
     public Task PrepareAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-    public Task<IReadOnlyList<Segment>> TranscribeAsync(string audioPath, CancellationToken cancellationToken = default)
+    public Task<EngineTranscript> TranscribeAsync(
+        string audioPath,
+        TranscriptionContext context,
+        CancellationToken cancellationToken = default)
     {
-        IReadOnlyList<Segment> segments = Path.GetFileName(audioPath) == "mic.m4a"
+        IReadOnlyList<EngineSegment> segments = Path.GetFileName(audioPath) == "mic.m4a"
             ? [
-                new Segment("", 1_000, 4_200, "We should ship the Windows recorder before the installer."),
-                new Segment("", 9_000, 12_000, "I'll take the audio capture."),
+                new EngineSegment(1_000, 4_200, "We should ship the Windows recorder before the installer.", 0.95, []),
+                new EngineSegment(9_000, 12_000, "I'll take the audio capture.", 0.94, []),
             ]
             : [
-                new Segment("", 4_760, 8_500, "Agreed. Keep the session format exactly as it is."),
-                new Segment("", 61_000, 64_000, "Let's review it on Friday."),
+                new EngineSegment(4_760, 8_500, "Agreed. Keep the session format exactly as it is.", 0.96, []),
+                new EngineSegment(61_000, 64_000, "Let's review it on Friday.", 0.93, []),
             ];
-        return Task.FromResult(segments);
+        return Task.FromResult(new EngineTranscript
+        {
+            Engine = Name,
+            Model = Model,
+            Version = "1.0.0",
+            Settings = new Dictionary<string, string> { ["decoder"] = "fixture" },
+            Text = string.Join(" ", segments.Select(segment => segment.Text)),
+            Language = "en",
+            AudioDurationMs = 64_000,
+            ProcessingDurationMs = 1,
+            Words = [],
+            Segments = segments,
+            Diagnostics = new Dictionary<string, string> { ["runtime"] = "fixture" },
+            Context = new EngineContextEvidence([], [], []),
+        });
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

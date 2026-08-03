@@ -23,7 +23,7 @@ public sealed class TranscriptionPipeline(ITranscriptionEngine engine, TextWrite
         var meta = SessionMeta.Read(sessionDirectory);
         await engine.PrepareAsync(cancellationToken);
 
-        var results = new List<(Track, IEnumerable<Segment>)>();
+        var results = new List<(Track, EngineTranscript)>();
         var attempted = 0;
         foreach (var track in meta.Tracks())
         {
@@ -37,7 +37,9 @@ public sealed class TranscriptionPipeline(ITranscriptionEngine engine, TextWrite
             Log(sessionDirectory, $"transcribing {track.File} ({engine.Name})");
             try
             {
-                results.Add((track, await engine.TranscribeAsync(audio, cancellationToken)));
+                var transcript = await engine.TranscribeAsync(
+                    audio, TranscriptionContext.Standard, cancellationToken);
+                results.Add((track, transcript));
             }
             catch (Exception error)
             {
@@ -51,11 +53,33 @@ public sealed class TranscriptionPipeline(ITranscriptionEngine engine, TextWrite
         // stays eligible for a retry.
         if (attempted > 0 && results.Count == 0) throw new AllTracksFailedException(attempted);
 
-        var merged = Transcript.Merge(results);
+        RawTranscript.Write(
+            sessionDirectory,
+            QualityMode.Standard,
+            results.Select(result => new RawTrack(
+                result.Item1.Key,
+                result.Item1.Speaker,
+                result.Item1.OffsetMs,
+                result.Item1.File,
+                [result.Item2],
+                0,
+                [])));
+
+        var merged = Transcript.Merge(results.Select(result => (
+            result.Item1,
+            result.Item2.Segments.Select(segment => new Segment(
+                "",
+                segment.StartMs,
+                segment.EndMs,
+                segment.Text,
+                segment.Confidence,
+                segment.Words)))));
         new Transcript
         {
             Engine = engine.Name,
             Model = engine.Model,
+            PipelineVersion = 2,
+            QualityMode = "standard",
             CreatedAt = DateTimeOffset.Now,
             Segments = merged,
         }.Write(sessionDirectory);

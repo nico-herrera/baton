@@ -6,7 +6,15 @@ using System.Text.Json.Nodes;
 namespace Patchthrough.Core;
 
 /// <summary>One line of speech, on the session clock.</summary>
-public sealed record Segment(string Speaker, int StartMs, int EndMs, string Text);
+public sealed record Segment(
+    string Speaker,
+    int StartMs,
+    int EndMs,
+    string Text,
+    double? Confidence = null,
+    IReadOnlyList<EngineWord>? Words = null,
+    string? SourceTrack = null,
+    IReadOnlyList<string>? AppliedVocabulary = null);
 
 /// <summary>
 /// The canonical transcript, and the readable rendering of it. The rendering is
@@ -16,8 +24,10 @@ public sealed record Segment(string Speaker, int StartMs, int EndMs, string Text
 /// </summary>
 public sealed class Transcript
 {
+    public int PipelineVersion { get; init; } = 2;
     public required string Engine { get; init; }
     public required string Model { get; init; }
+    public string QualityMode { get; init; } = "standard";
     public required DateTimeOffset CreatedAt { get; init; }
     public required IReadOnlyList<Segment> Segments { get; init; }
 
@@ -37,6 +47,7 @@ public sealed class Transcript
                 merged.Add(segment with
                 {
                     Speaker = track.Speaker,
+                    SourceTrack = track.Key,
                     StartMs = segment.StartMs + track.OffsetMs,
                     EndMs = segment.EndMs + track.OffsetMs,
                 });
@@ -53,11 +64,16 @@ public sealed class Transcript
         var segments = new JsonArray();
         foreach (var segment in Segments)
         {
+            var appliedVocabulary = new JsonArray();
+            foreach (var term in segment.AppliedVocabulary ?? []) appliedVocabulary.Add(term);
             // Alphabetical, matching Swift's sorted keys.
             segments.Add(new JsonObject
             {
+                ["applied_vocabulary"] = appliedVocabulary,
+                ["confidence"] = segment.Confidence,
                 ["end_ms"] = segment.EndMs,
                 ["speaker"] = segment.Speaker,
+                ["source_track"] = segment.SourceTrack,
                 ["start_ms"] = segment.StartMs,
                 ["text"] = segment.Text,
             });
@@ -67,6 +83,8 @@ public sealed class Transcript
             ["created_at"] = SessionMeta.Iso8601(CreatedAt),
             ["engine"] = Engine,
             ["model"] = Model,
+            ["pipeline_version"] = PipelineVersion,
+            ["quality_mode"] = QualityMode,
             ["segments"] = segments,
         };
         return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });

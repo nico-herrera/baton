@@ -132,6 +132,7 @@ actor TranscriptionCoordinator {
         let engine = try await preparedEngine()
 
         var merged: [Transcript.Segment] = []
+        var rawTracks: [RawTrack] = []
         var attempted = 0
         var succeeded = 0
         for track in meta.tracks {
@@ -144,21 +145,41 @@ actor TranscriptionCoordinator {
             log(dir, "transcribing \(track.file) (\(engine.name))")
             // One bad track (empty, truncated) shouldn't cost us the other's
             // transcript. Log the failure and keep going.
-            let segments: [TranscriptSegment]
+            let result: EngineTranscript
             do {
-                segments = try await engine.transcribe(audio)
+                result = try await engine.transcribe(audio, context: .standard)
             } catch {
                 log(dir, "skipping \(track.file): \(error)")
                 continue
             }
             succeeded += 1
             let offset = TimeInterval(track.offsetMs) / 1000
-            merged += segments.map {
+            rawTracks.append(RawTrack(
+                sourceTrack: track.key,
+                speaker: track.speaker,
+                offsetMs: track.offsetMs,
+                audioFile: track.file,
+                hypotheses: [result],
+                selectedHypothesis: 0,
+                optionalStageFailures: []
+            ))
+            merged += result.segments.map {
                 Transcript.Segment(
                     speaker: track.speaker,
-                    start_ms: Int(($0.start + offset) * 1000),
-                    end_ms: Int(($0.end + offset) * 1000),
-                    text: $0.text
+                    source_track: track.key,
+                    start_ms: $0.startMs + Int(offset * 1000),
+                    end_ms: $0.endMs + Int(offset * 1000),
+                    text: $0.text,
+                    confidence: $0.confidence,
+                    applied_vocabulary: result.context.appliedTerms,
+                    words: $0.words.map { word in
+                        TimedWord(
+                            text: word.text,
+                            startMs: word.startMs + track.offsetMs,
+                            endMs: word.endMs + track.offsetMs,
+                            confidence: word.confidence
+                        )
+                    }
                 )
             }
         }
@@ -171,6 +192,14 @@ actor TranscriptionCoordinator {
         if attempted > 0 && succeeded == 0 {
             throw TranscriptionError.allTracksFailed(attempted: attempted)
         }
+
+        try RawTranscript(
+            schemaVersion: 1,
+            pipelineVersion: 2,
+            qualityMode: .standard,
+            createdAt: ISO8601DateFormatter().string(from: Date()),
+            tracks: rawTracks
+        ).write(to: dir)
 
         // Stable ordering: Swift's sort isn't stable, so mic/system segments
         // sharing a start_ms would otherwise swap places between runs. Break
@@ -190,8 +219,10 @@ actor TranscriptionCoordinator {
         }
 
         let transcript = Transcript(
+            pipeline_version: 2,
             engine: engine.name,
             model: engine.model,
+            quality_mode: .standard,
             created_at: ISO8601DateFormatter().string(from: Date()),
             segments: merged
         )
@@ -261,6 +292,7 @@ actor TranscriptionCoordinator {
 /// represent, and how far each track started after the earliest one.
 private struct SessionMeta {
     struct Track {
+        let key: String
         let file: String
         let speaker: String
         let offsetMs: Int
@@ -291,10 +323,10 @@ private struct SessionMeta {
         let offsets = json["start_offset_ms"] as? [String: Int] ?? [:]
         var tracks: [Track] = []
         if let mic = files["mic"] {
-            tracks.append(Track(file: mic, speaker: "me", offsetMs: offsets["mic"] ?? 0))
+            tracks.append(Track(key: "mic", file: mic, speaker: "me", offsetMs: offsets["mic"] ?? 0))
         }
         if let system = files["system"] {
-            tracks.append(Track(file: system, speaker: "them", offsetMs: offsets["system"] ?? 0))
+            tracks.append(Track(key: "system", file: system, speaker: "them", offsetMs: offsets["system"] ?? 0))
         }
         return SessionMeta(tracks: tracks)
     }
@@ -396,16 +428,28 @@ private enum EchoDedup {
 
 /// Canonical transcript. Property names are the JSON schema. This struct
 /// exists to be serialized.
-private struct Transcript: Codable {
-    struct Segment: Codable {
+private struct Transcript: Encodable {
+    struct Segment: Encodable {
         let speaker: String
+        let source_track: String
         let start_ms: Int
         let end_ms: Int
         let text: String
+        let confidence: Double?
+        let applied_vocabulary: [String]
+        /// Retained in memory for word-level echo comparison, but the full
+        /// timing data lives in transcript.raw.json rather than duplicating it.
+        let words: [TimedWord]
+
+        private enum CodingKeys: String, CodingKey {
+            case speaker, source_track, start_ms, end_ms, text, confidence, applied_vocabulary
+        }
     }
 
+    let pipeline_version: Int
     let engine: String
     let model: String
+    let quality_mode: QualityMode
     let created_at: String
     let segments: [Segment]
 
@@ -436,5 +480,33 @@ private struct Transcript: Codable {
         return h > 0
             ? String(format: "%d:%02d:%02d", h, m, s)
             : String(format: "%d:%02d", m, s)
+    }
+}
+
+private struct RawTrack: Codable {
+    let sourceTrack: String
+    let speaker: String
+    let offsetMs: Int
+    let audioFile: String
+    let hypotheses: [EngineTranscript]
+    let selectedHypothesis: Int
+    let optionalStageFailures: [String]
+}
+
+private struct RawTranscript: Codable {
+    let schemaVersion: Int
+    let pipelineVersion: Int
+    let qualityMode: QualityMode
+    let createdAt: String
+    let tracks: [RawTrack]
+
+    func write(to directory: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        try encoder.encode(self).write(
+            to: directory.appendingPathComponent("transcript.raw.json"),
+            options: .atomic
+        )
     }
 }

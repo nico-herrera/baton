@@ -41,5 +41,9 @@ let package = Package(
                 ]),
             ]
         ),
+        .testTarget(
+            name: "patchthroughTests",
+            dependencies: ["patchthrough"]
+        ),
     ]
 )

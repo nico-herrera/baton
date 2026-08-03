@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchthrough.dev/schemas/engine-transcript-v1.schema.json",
+  "title": "Patchthrough engine transcript",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["engine", "model", "version", "settings", "text", "audio_duration_ms", "processing_duration_ms", "words", "segments", "diagnostics", "context"],
+  "properties": {
+    "engine": {"type": "string", "minLength": 1},
+    "model": {"type": "string", "minLength": 1},
+    "version": {"type": "string", "minLength": 1},
+    "settings": {"type": "object"},
+    "text": {"type": "string"},
+    "language": {"type": ["string", "null"]},
+    "audio_duration_ms": {"type": "integer", "minimum": 0},
+    "processing_duration_ms": {"type": "integer", "minimum": 0},
+    "words": {"type": "array", "items": {"$ref": "#/$defs/word"}},
+    "segments": {"type": "array", "items": {"$ref": "#/$defs/segment"}},
+    "diagnostics": {"type": "object"},
+    "context": {"$ref": "#/$defs/context"}
+  },
+  "$defs": {
+    "word": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "start_ms", "end_ms"],
+      "properties": {
+        "text": {"type": "string", "minLength": 1},
+        "start_ms": {"type": "integer", "minimum": 0},
+        "end_ms": {"type": "integer", "minimum": 0},
+        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+      }
+    },
+    "segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_ms", "end_ms", "text", "words"],
+      "properties": {
+        "start_ms": {"type": "integer", "minimum": 0},
+        "end_ms": {"type": "integer", "minimum": 0},
+        "text": {"type": "string"},
+        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "words": {"type": "array", "items": {"$ref": "#/$defs/word"}}
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested_terms", "detected_terms", "applied_terms"],
+      "properties": {
+        "requested_terms": {"type": "array", "items": {"type": "string"}},
+        "detected_terms": {"type": "array", "items": {"type": "string"}},
+        "applied_terms": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}
