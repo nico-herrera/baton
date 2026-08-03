@@ -526,11 +526,39 @@ enum Handoff {
 
     struct Session {
         let dir: URL
+        /// The folder name. It is the session's identity, so it names staged
+        /// files and never changes.
         let name: String
+        /// What the user called this meeting, if they named it. The folder
+        /// timestamp is a poor title for an agent to read.
+        let title: String?
         let words: Int
         let segments: Int
         let duration: String
         let cleanStop: Bool
+
+        /// The name to show and to put in the handoff document.
+        var displayName: String { title ?? name }
+    }
+
+    /// Store the user's name for a session in its own `meta.json`, so the name
+    /// travels with the folder and any tool that reads the session can see it.
+    /// The file is rewritten with every other key preserved: `meta.json` holds
+    /// the recording's timing, and losing that would break transcription.
+    static func rename(sessionDir: URL, to title: String?) throws {
+        let url = sessionDir.appendingPathComponent("meta.json")
+        var meta = (try? Data(contentsOf: url))
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmed, !trimmed.isEmpty {
+            meta["name"] = trimmed
+        } else {
+            meta.removeValue(forKey: "name")
+        }
+        let data = try JSONSerialization.data(
+            withJSONObject: meta, options: [.prettyPrinted, .sortedKeys]
+        )
+        try data.write(to: url, options: .atomic)
     }
 
     enum HandoffError: Error, CustomStringConvertible {
@@ -600,16 +628,21 @@ enum Handoff {
 
         var duration = "unknown"
         var cleanStop = true
+        var title: String?
         if let metaData = try? Data(contentsOf: dir.appendingPathComponent("meta.json")),
            let meta = try? JSONSerialization.jsonObject(with: metaData) as? [String: Any] {
             if let secs = meta["duration_seconds"] as? Int {
                 duration = "\(secs / 60)m\(String(format: "%02d", secs % 60))s"
             }
             cleanStop = meta["clean_stop"] as? Bool ?? true
+            if let name = (meta["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !name.isEmpty {
+                title = name
+            }
         }
 
         return Session(
-            dir: dir, name: dir.lastPathComponent,
+            dir: dir, name: dir.lastPathComponent, title: title,
             words: words, segments: segments,
             duration: duration, cleanStop: cleanStop
         )
@@ -632,7 +665,7 @@ enum Handoff {
 
         let truncationNote = session.cleanStop ? "" : " (recording ended uncleanly, so the transcript may be truncated)"
         return """
-        # Meeting handoff: \(session.name)
+        # Meeting handoff: \(session.displayName)
 
         ## Instructions
 
