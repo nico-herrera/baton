@@ -181,6 +181,14 @@ actor TranscriptionCoordinator {
                 : $0.speaker < $1.speaker
         }
 
+        if Config.dedupMicEcho() {
+            let before = merged.count
+            merged = EchoDedup.dropMicEcho(from: merged)
+            if merged.count < before {
+                log(dir, "dropped \(before - merged.count) mic segment(s) that echo the system track")
+            }
+        }
+
         let transcript = Transcript(
             engine: engine.name,
             model: engine.model,
@@ -289,6 +297,100 @@ private struct SessionMeta {
             tracks.append(Track(file: system, speaker: "them", offsetMs: offsets["system"] ?? 0))
         }
         return SessionMeta(tracks: tracks)
+    }
+}
+
+/// Speech from the speakers reaches the mic, so the other side of a call is
+/// transcribed twice: once from system.caf as "them" and again from mic.caf
+/// as "me". The second copy is worse than noise, because it credits the user
+/// with words another person said. This filter drops a mic segment when a
+/// system segment nearby says the same thing.
+///
+/// The mic copy is the one to drop: the system track is a process tap of
+/// other apps' output, so the local user's live voice cannot appear on it.
+/// The one path that direction is far-end echo, and conferencing apps cancel
+/// that on their side.
+///
+/// Thresholds were tuned against a real 9.5-minute call recorded over
+/// speakers (293 segments, 90 echoes): similarity 0.7 reproduced a
+/// difflib-0.8 reference to within one segment either way, and the
+/// containment rule catches echo fragments that length-ratio misses. The
+/// minimum-length floor keeps a genuine simultaneous "yeah" from both
+/// speakers alive.
+private enum EchoDedup {
+    /// How far apart (ms) the two copies of one utterance can start. Echo is
+    /// near-simultaneous; 5s absorbs the engines segmenting the tracks
+    /// differently.
+    private static let windowMs = 5000
+    /// Segments whose normalized text is shorter never drop: "yeah" from
+    /// both speakers is agreement, not echo.
+    private static let minLength = 12
+    /// Minimum Levenshtein similarity for two texts to count as one
+    /// utterance.
+    private static let threshold = 0.7
+
+    static func dropMicEcho(from segments: [Transcript.Segment]) -> [Transcript.Segment] {
+        let system = segments.filter { $0.speaker == "them" }
+            .map { (start: $0.start_ms, text: normalize($0.text)) }
+        guard !system.isEmpty else { return segments }
+
+        return segments.filter { seg in
+            guard seg.speaker == "me" else { return true }
+            let text = normalize(seg.text)
+            guard text.count >= minLength else { return true }
+            return !system.contains { candidate in
+                abs(candidate.start - seg.start_ms) <= windowMs
+                    && isEcho(text, candidate.text)
+            }
+        }
+    }
+
+    /// Lowercase, punctuation stripped, whitespace collapsed. ASR renders the
+    /// same audio with different casing and punctuation per track; the words
+    /// are what repeat.
+    private static func normalize(_ text: String) -> String {
+        text.lowercased()
+            .map { $0.isLetter || $0.isNumber ? String($0) : " " }
+            .joined()
+            .split(separator: " ")
+            .joined(separator: " ")
+    }
+
+    private static func isEcho(_ a: String, _ b: String) -> Bool {
+        // Containment: the mic often catches a fragment of an utterance the
+        // system track has whole (or the reverse). A shared run this long is
+        // not coincidence.
+        if a.count >= minLength, b.count >= minLength, a.contains(b) || b.contains(a) {
+            return true
+        }
+        let longest = max(a.count, b.count)
+        guard longest > 0 else { return false }
+        // Cheap pre-check: a length gap alone can rule the pair out, and
+        // Levenshtein is quadratic.
+        guard Double(longest - min(a.count, b.count)) / Double(longest) <= 1 - threshold else {
+            return false
+        }
+        return 1 - Double(levenshtein(a, b)) / Double(longest) >= threshold
+    }
+
+    private static func levenshtein(_ a: String, _ b: String) -> Int {
+        let s = Array(a.unicodeScalars), t = Array(b.unicodeScalars)
+        if s.isEmpty { return t.count }
+        if t.isEmpty { return s.count }
+        var previous = Array(0...t.count)
+        var current = [Int](repeating: 0, count: t.count + 1)
+        for i in 1...s.count {
+            current[0] = i
+            for j in 1...t.count {
+                current[j] = Swift.min(
+                    previous[j] + 1,
+                    current[j - 1] + 1,
+                    previous[j - 1] + (s[i - 1] == t[j - 1] ? 0 : 1)
+                )
+            }
+            swap(&previous, &current)
+        }
+        return previous[t.count]
     }
 }
 
