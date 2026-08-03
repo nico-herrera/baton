@@ -4,7 +4,8 @@ import Foundation
 ///
 ///     {
 ///       "recordings_dir": "~/Recordings",
-///       "transcription": { "enabled": true, "engine": "parakeet" },
+///       "transcription": { "enabled": true, "engine": "parakeet",
+///                          "dedup_mic_echo": true },
 ///       "mic_voice_processing": true,
 ///       "on_stop": "my-hook",
 ///       "custom_destinations": [
@@ -47,6 +48,16 @@ enum Config {
     /// warns and falls back for anything else.
     static func transcriptionEngine() -> String {
         transcription()?["engine"] as? String ?? "parakeet"
+    }
+
+    /// Drop mic segments that duplicate the system track. Speech from the
+    /// speakers reaches the mic, so without this the person on the other end
+    /// of a call appears as "me" as well as "them". Default on. The switch
+    /// exists because the filter deletes transcript content by heuristic:
+    /// set `"transcription": {"dedup_mic_echo": false}` to keep every raw
+    /// segment.
+    static func dedupMicEcho() -> Bool {
+        transcription()?["dedup_mic_echo"] as? Bool ?? true
     }
 
     private static func transcription() -> [String: Any]? {
