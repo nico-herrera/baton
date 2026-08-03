@@ -4,26 +4,58 @@ public sealed class AllTracksFailedException(int attempted) : Exception(
     $"all {attempted} track(s) failed to transcribe. See the lines above for the per-track cause");
 
 /// <summary>
-/// Turns a recorded session into a transcript, mirroring
-/// TranscriptionCoordinator.swift. The filesystem is the queue: a session with
-/// meta.json but no transcript.json is pending, so a crash mid-transcription
-/// retries on the next run.
+/// Cross-platform post-recording pipeline. Engines run sequentially, every raw
+/// hypothesis is persisted before optional stages, and each track can recover
+/// independently when an engine fails.
 /// </summary>
-public sealed class TranscriptionPipeline(ITranscriptionEngine engine, TextWriter? log = null)
+public sealed class TranscriptionPipeline
 {
-    private readonly TextWriter _log = log ?? Console.Error;
+    private readonly IReadOnlyList<ITranscriptionEngine> _engines;
+    private readonly TextWriter _log;
+    private readonly QualityMode _qualityMode;
+    private readonly QualityProfile _profile;
+    private readonly TranscriptionContext _context;
+    private readonly bool _dedupMicEcho;
 
-    /// <summary>
-    /// Transcribe one session. Both audio tracks are independent: one bad track
-    /// must not cost the other its transcript, so a failing track is logged and
-    /// skipped.
-    /// </summary>
+    public TranscriptionPipeline(ITranscriptionEngine engine, TextWriter? log = null)
+        : this([engine], QualityMode.Standard, QualityProfile.SafeDefault, TranscriptionContext.Standard, true, log) { }
+
+    public TranscriptionPipeline(
+        IReadOnlyList<ITranscriptionEngine> engines,
+        QualityMode qualityMode,
+        QualityProfile profile,
+        TranscriptionContext context,
+        bool dedupMicEcho = true,
+        TextWriter? log = null)
+    {
+        _engines = engines;
+        _qualityMode = qualityMode;
+        _profile = profile;
+        _context = context;
+        _dedupMicEcho = dedupMicEcho;
+        _log = log ?? Console.Error;
+    }
+
     public async Task RunAsync(string sessionDirectory, CancellationToken cancellationToken = default)
     {
         var meta = SessionMeta.Read(sessionDirectory);
-        await engine.PrepareAsync(cancellationToken);
+        var active = new List<ITranscriptionEngine>();
+        foreach (var engine in _engines)
+        {
+            try
+            {
+                await engine.PrepareAsync(cancellationToken);
+                active.Add(engine);
+            }
+            catch (Exception error)
+            {
+                Log(sessionDirectory, $"optional engine {engine.Name} failed to prepare: {error.Message}");
+            }
+        }
+        if (active.Count == 0) throw new InvalidOperationException("no transcription engine could be prepared");
 
-        var results = new List<(Track, EngineTranscript)>();
+        var selectedResults = new List<(Track, EngineTranscript)>();
+        var rawTracks = new List<RawTrack>();
         var attempted = 0;
         foreach (var track in meta.Tracks())
         {
@@ -34,38 +66,44 @@ public sealed class TranscriptionPipeline(ITranscriptionEngine engine, TextWrite
                 continue;
             }
             attempted++;
-            Log(sessionDirectory, $"transcribing {track.File} ({engine.Name})");
-            try
+            var hypotheses = new List<EngineTranscript>();
+            var failures = new List<string>();
+            foreach (var engine in active)
             {
-                var transcript = await engine.TranscribeAsync(
-                    audio, TranscriptionContext.Standard, cancellationToken);
-                results.Add((track, transcript));
+                Log(sessionDirectory, $"transcribing {track.File} ({engine.Name})");
+                try
+                {
+                    hypotheses.Add(await engine.TranscribeAsync(audio, _context, cancellationToken));
+                }
+                catch (Exception error)
+                {
+                    var failure = $"{engine.Name}: {error.Message}";
+                    failures.Add(failure);
+                    Log(sessionDirectory, $"optional engine failed for {track.File}: {failure}");
+                }
             }
-            catch (Exception error)
+            if (hypotheses.Count == 0) continue;
+
+            EngineTranscript rawSelection;
+            if (_profile.CanRunConsensus && hypotheses.Count >= 2)
             {
-                Log(sessionDirectory, $"skipping {track.File}: {error.Message}");
+                rawSelection = TranscriptConsensus.Combine(hypotheses[0], hypotheses[1], _profile.Calibration);
+                hypotheses.Add(rawSelection);
             }
+            else rawSelection = hypotheses[0];
+            var selected = TranscriptCalibration.Apply(rawSelection, _profile.Calibration);
+            selectedResults.Add((track, selected));
+            rawTracks.Add(new RawTrack(
+                track.Key, track.Speaker, track.OffsetMs, track.File,
+                hypotheses, hypotheses.Count - 1, failures));
         }
 
-        // Every track that was tried failed. Writing transcript.json here would
-        // be actively harmful: it is the completion marker, so a valid-looking
-        // empty transcript buries the session forever. Throw, so the session
-        // stays eligible for a retry.
-        if (attempted > 0 && results.Count == 0) throw new AllTracksFailedException(attempted);
+        if (attempted > 0 && selectedResults.Count == 0) throw new AllTracksFailedException(attempted);
 
-        RawTranscript.Write(
-            sessionDirectory,
-            QualityMode.Standard,
-            results.Select(result => new RawTrack(
-                result.Item1.Key,
-                result.Item1.Speaker,
-                result.Item1.OffsetMs,
-                result.Item1.File,
-                [result.Item2],
-                0,
-                [])));
-
-        var merged = Transcript.Merge(results.Select(result => (
+        // Durable raw output is first. Everything below this line can be
+        // repeated or bypassed without losing a single engine hypothesis.
+        RawTranscript.Write(sessionDirectory, _qualityMode, rawTracks);
+        var merged = Transcript.Merge(selectedResults.Select(result => (
             result.Item1,
             result.Item2.Segments.Select(segment => new Segment(
                 "",
@@ -73,13 +111,18 @@ public sealed class TranscriptionPipeline(ITranscriptionEngine engine, TextWrite
                 segment.EndMs,
                 segment.Text,
                 segment.Confidence,
-                segment.Words)))));
+                segment.Words,
+                AppliedVocabulary: result.Item2.Context.AppliedTerms)))));
+        if (_dedupMicEcho) merged = EchoDedup.DropMicEcho(merged);
+
+        var selectedEngines = selectedResults.Select(result => result.Item2.Engine).Distinct(StringComparer.Ordinal);
+        var selectedModels = selectedResults.Select(result => result.Item2.Model).Distinct(StringComparer.Ordinal);
         new Transcript
         {
-            Engine = engine.Name,
-            Model = engine.Model,
+            Engine = string.Join("+", selectedEngines),
+            Model = string.Join("+", selectedModels),
             PipelineVersion = 2,
-            QualityMode = "standard",
+            QualityMode = _qualityMode == QualityMode.MaxAccuracy ? "max_accuracy" : "standard",
             CreatedAt = DateTimeOffset.Now,
             Segments = merged,
         }.Write(sessionDirectory);
@@ -90,18 +133,11 @@ public sealed class TranscriptionPipeline(ITranscriptionEngine engine, TextWrite
         }
         catch (Exception error)
         {
-            // transcript.json is the durable completion marker. A failure to
-            // write the secondary handoff file must stay visible, but it must
-            // not turn a good transcription into a permanent failure.
             Log(sessionDirectory, $"could not create handoff.md: {error.Message}");
         }
         Log(sessionDirectory, $"done: {merged.Count} segments");
     }
 
-    /// <summary>
-    /// Sessions that finished but were never transcribed, oldest first. The
-    /// directory names sort chronologically, so this is a name sort.
-    /// </summary>
     public static IReadOnlyList<string> Pending(string root)
     {
         if (!Directory.Exists(root)) return [];
@@ -112,11 +148,6 @@ public sealed class TranscriptionPipeline(ITranscriptionEngine engine, TextWrite
             .ToList();
     }
 
-    /// <summary>
-    /// Sessions with a transcript but no handoff.md. That file joined the
-    /// public contract after the first releases, so backfill it and let the
-    /// npm CLI read the same document everywhere.
-    /// </summary>
     public static IReadOnlyList<string> MissingHandoffs(string root)
     {
         if (!Directory.Exists(root)) return [];
@@ -131,13 +162,7 @@ public sealed class TranscriptionPipeline(ITranscriptionEngine engine, TextWrite
     {
         var line = $"{SessionMeta.Iso8601(DateTimeOffset.Now)} {message}";
         _log.WriteLine(line);
-        try
-        {
-            File.AppendAllText(Path.Combine(sessionDirectory, "transcribe.log"), line + "\n");
-        }
-        catch (IOException)
-        {
-            // The log is a convenience. Losing it must not fail a transcription.
-        }
+        try { File.AppendAllText(Path.Combine(sessionDirectory, "transcribe.log"), line + "\n"); }
+        catch (IOException) { }
     }
 }

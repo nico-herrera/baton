@@ -72,6 +72,8 @@ public sealed class Config
         }
     }
 
+    public bool DedupMicEcho => NestedBool("transcription", "dedup_mic_echo") ?? true;
+
     public bool MicVoiceProcessing => Bool("mic_voice_processing") ?? false;
 
     public string? OnStop => String("on_stop");

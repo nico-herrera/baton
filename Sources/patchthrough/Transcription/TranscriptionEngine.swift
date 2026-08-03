@@ -134,7 +134,10 @@ enum TranscriptSegmentation {
 
     static func normalizedText(_ text: String) -> String {
         text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .replacingOccurrences(of: " ", with: " ")
+            .replacingOccurrences(of: "\\s+([,.;:!?])", with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: "([\\[(])\\s+", with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+\\)", with: ")", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+\\]", with: "]", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

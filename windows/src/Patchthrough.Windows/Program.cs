@@ -2,6 +2,7 @@ using NAudio.CoreAudioApi;
 using Patchthrough.Core;
 using Patchthrough.Windows;
 using Patchthrough.Windows.Transcription;
+using System.Text.Json;
 
 // The first Windows milestone is a console recorder. It writes the session
 // format, and the npm CLI does the handoff. The tray application comes later.
@@ -29,7 +30,7 @@ static async Task<int> RunAsync(string[] args)
             }
             else
             {
-                await TranscribeAsync([directory]);
+                await TranscribeAsync([directory], config, options.GetValueOrDefault("project"));
             }
             Console.WriteLine(directory);
             return 0;
@@ -44,18 +45,22 @@ static async Task<int> RunAsync(string[] args)
                 return 0;
             }
             Console.Error.WriteLine($"{pending.Count} session(s) to transcribe");
-            return await TranscribeAsync(pending);
+            return await TranscribeAsync(pending, config, options.GetValueOrDefault("project"));
 
         case "doctor":
             return Doctor(root, config);
+
+        case "benchmark":
+            return await BenchmarkAsync(options);
 
         default:
             Console.WriteLine("""
             Patchthrough for Windows
 
-              Patchthrough rec [--out <dir>] [--name <title>]   record a meeting
-              Patchthrough transcribe [--out <dir>]             transcribe what is pending
+              Patchthrough rec [--out <dir>] [--name <title>] [--project <dir>]   record a meeting
+              Patchthrough transcribe [--out <dir>] [--project <dir>]             transcribe what is pending
               Patchthrough doctor [--out <dir>]                 check this machine
+              Patchthrough benchmark --audio <file> [--engine parakeet|whisper]
 
             Recording writes a session that the npm CLI hands to an agent:
 
@@ -66,28 +71,90 @@ static async Task<int> RunAsync(string[] args)
     }
 }
 
+static async Task<int> BenchmarkAsync(IReadOnlyDictionary<string, string> options)
+{
+    if (!options.TryGetValue("audio", out var audio) || string.IsNullOrWhiteSpace(audio))
+        throw new ArgumentException("benchmark requires --audio <file>");
+    if (!File.Exists(audio)) throw new FileNotFoundException("benchmark audio does not exist", audio);
+    var name = options.GetValueOrDefault("engine", "parakeet").ToLowerInvariant();
+    ITranscriptionEngine engine = name switch
+    {
+        "parakeet" => new ParakeetEngine(),
+        "whisper" => new WhisperEngine(),
+        _ => throw new ArgumentException("engine must be parakeet or whisper"),
+    };
+    var quality = options.GetValueOrDefault("quality", "standard") switch
+    {
+        "standard" => QualityMode.Standard,
+        "max_accuracy" => QualityMode.MaxAccuracy,
+        _ => throw new ArgumentException("quality must be standard or max_accuracy"),
+    };
+    try
+    {
+        await engine.PrepareAsync();
+        var context = new TranscriptionContext(
+            quality,
+            ProjectVocabulary.Collect(options.GetValueOrDefault("project")));
+        var transcript = await engine.TranscribeAsync(Path.GetFullPath(audio), context);
+        var json = JsonSerializer.Serialize(transcript, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            WriteIndented = true,
+        }) + Environment.NewLine;
+        if (options.TryGetValue("output", out var output) && !string.IsNullOrWhiteSpace(output))
+            await File.WriteAllTextAsync(output, json);
+        else
+            Console.Write(json);
+        return 0;
+    }
+    finally
+    {
+        await engine.DisposeAsync();
+    }
+}
+
 /// <summary>
 /// Transcribe each session. A session that fails keeps its audio and its
 /// meta.json, so `transcribe` picks it up again later.
 /// </summary>
-static async Task<int> TranscribeAsync(IReadOnlyList<string> sessions)
+static async Task<int> TranscribeAsync(
+    IReadOnlyList<string> sessions,
+    Config config,
+    string? projectOverride)
 {
-    await using var engine = new ParakeetEngine();
-    var pipeline = new TranscriptionPipeline(engine);
-    var failed = 0;
-    foreach (var session in sessions)
+    var profile = QualityProfile.Load();
+    var mode = config.TranscriptionQualityMode;
+    var engines = profile.Engines(config.TranscriptionEngine, mode).Select(name =>
+        name.ToLowerInvariant() switch
+        {
+            "parakeet" => (ITranscriptionEngine)new ParakeetEngine(),
+            "whisper" => new WhisperEngine(),
+            _ => throw new InvalidOperationException($"unknown transcription engine: {name}"),
+        }).ToList();
+    var project = !string.IsNullOrWhiteSpace(projectOverride)
+        ? Config.ExpandHome(projectOverride)
+        : config.TranscriptionProjectDirectory;
+    var context = new TranscriptionContext(mode, ProjectVocabulary.Collect(project));
+    var pipeline = new TranscriptionPipeline(
+        engines, mode, profile, context, config.DedupMicEcho);
+    try
     {
-        try
+        var failed = 0;
+        foreach (var session in sessions)
         {
-            await pipeline.RunAsync(session);
+            try { await pipeline.RunAsync(session); }
+            catch (Exception error)
+            {
+                failed++;
+                Console.Error.WriteLine($"{Path.GetFileName(session)}: {error.Message}");
+            }
         }
-        catch (Exception error)
-        {
-            failed++;
-            Console.Error.WriteLine($"{Path.GetFileName(session)}: {error.Message}");
-        }
+        return failed == 0 ? 0 : 1;
     }
-    return failed == 0 ? 0 : 1;
+    finally
+    {
+        foreach (var engine in engines) await engine.DisposeAsync();
+    }
 }
 
 static string Record(string root, string? name)
@@ -141,11 +208,13 @@ static int Doctor(string root, Config config)
     }
     else
     {
-        var models = ModelStore.Default;
-        var missing = models.Missing();
-        ok &= Report(missing.Count == 0,
-            $"transcription {config.TranscriptionEngine}, {models.Directory}",
-            $"missing {string.Join(", ", missing.Select(Path.GetFileName))} in {models.Directory}");
+        var names = QualityProfile.Load().Engines(config.TranscriptionEngine, config.TranscriptionQualityMode);
+        Console.WriteLine($"{Mark(true)} transcription {string.Join(" + ", names)} ({config.TranscriptionQualityMode})");
+        var missing = ModelStore.Default.Missing();
+        if (names.Contains("parakeet") && missing.Count > 0)
+            Console.WriteLine($"○ model       Parakeet will download and verify on first use ({ModelStore.Default.Directory})");
+        if (names.Contains("whisper") && !File.Exists(WhisperModelStore.Default.Path))
+            Console.WriteLine($"○ model       Whisper will download and verify on first use ({WhisperModelStore.Default.Directory})");
     }
 
     // A pending session is one the CLI cannot hand off yet.

@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Patchthrough.Core;
 
 /// <summary>One word and its engine-native confidence on the source clock.</summary>
@@ -79,11 +81,12 @@ public static class Segmentation
                 ? tokenStart + durations[i]
                 : i + 1 < startSeconds.Count ? startSeconds[i + 1] : tokenStart;
 
-            if (token.StartsWith('▁'))
+            var startsWord = token.StartsWith('▁') || token.StartsWith(' ');
+            if (startsWord)
             {
                 Flush();
                 start = tokenStart;
-                text.Append(token.AsSpan(1));
+                text.Append(token.TrimStart('▁', ' '));
             }
             else
             {
@@ -98,6 +101,12 @@ public static class Segmentation
         return words.Where(w => w.Word.Length > 0).ToList();
     }
 
-    private static string Normalize(string text) =>
-        string.Join(" ", text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+    public static string Normalize(string text)
+    {
+        var clean = string.Join(" ", text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        clean = Regex.Replace(clean, "\\s+([,.;:!?])", "$1", RegexOptions.CultureInvariant);
+        clean = Regex.Replace(clean, "([\\[(])\\s+", "$1", RegexOptions.CultureInvariant);
+        clean = Regex.Replace(clean, "\\s+\\)", ")", RegexOptions.CultureInvariant);
+        return Regex.Replace(clean, "\\s+\\]", "]", RegexOptions.CultureInvariant);
+    }
 }

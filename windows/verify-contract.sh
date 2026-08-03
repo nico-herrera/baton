@@ -20,7 +20,7 @@ SESSION="$(dotnet run --project "$REPO/windows/tools/SessionFixture" -c Release 
 NAME="$(basename "$SESSION")"
 ok "wrote $NAME"
 
-for file in meta.json transcript.json transcript.md handoff.md; do
+for file in meta.json transcript.json transcript.raw.json transcript.md handoff.md; do
   [ -f "$SESSION/$file" ] || fail "no $file"
 done
 ok "the session holds every file of the public contract"
