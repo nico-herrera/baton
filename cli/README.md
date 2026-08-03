@@ -65,8 +65,14 @@ for the exact format.
 
 ## Requirements
 
-Node.js 18 or newer. Recording and on-device transcription still require the
+Node.js 18 or newer. The `hand`, `transcripts`, and `doctor` commands also run
+on Windows and Linux. Web handoffs run on macOS and Windows, because they use
+the system clipboard. Recording and on-device transcription still require the
 separate macOS 15+ Apple Silicon app.
+
+On Windows, npm installs most agents as a `.cmd` shim. A shim cannot take a
+prompt with newlines as an argument, so the CLI puts the prompt on the
+clipboard and tells you to paste it after the agent starts.
 
 ## License
 

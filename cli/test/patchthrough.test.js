@@ -34,7 +34,7 @@ test('recordings root follows the shared app config', (t) => {
   fs.mkdirSync(path.dirname(config), { recursive: true });
   fs.writeFileSync(config, JSON.stringify({ recordings_dir: '~/Meetings' }));
   assert.equal(resolveRecordingsRoot(undefined, { home }), path.join(home, 'Meetings'));
-  assert.equal(resolveRecordingsRoot('/tmp/override', { home }), '/tmp/override');
+  assert.equal(resolveRecordingsRoot('/tmp/override', { home }), path.resolve('/tmp/override'));
 });
 
 test('newest transcribed session wins and pending sessions remain listable', (t) => {
@@ -98,8 +98,8 @@ test('published executable stages a file without running an agent', (t) => {
     { encoding: 'utf8' },
   );
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stderr, /staged .*\.meeting\/meeting\.md/);
-  assert.match(result.stdout, /Read \.meeting\/meeting\.md/);
+  assert.match(result.stderr, /staged .*\.meeting[\\/]meeting\.md/);
+  assert.match(result.stdout, /Read \.meeting[\\/]meeting\.md/);
   assert.match(
     fs.readFileSync(path.join(repo, '.meeting', 'meeting.md'), 'utf8'),
     /command-line client into its own package boundary/,
