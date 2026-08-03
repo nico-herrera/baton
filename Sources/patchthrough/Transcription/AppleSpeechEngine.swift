@@ -3,6 +3,7 @@ import CoreMedia
 import Foundation
 import Speech
 
+#if compiler(>=6.2)
 /// Apple's on-device SpeechTranscriber is an evidence candidate on macOS 26+.
 /// It is never selected merely because it is built in; the quality profile
 /// must name it after it passes the same Patchthrough corpus.
@@ -114,3 +115,23 @@ actor AppleSpeechEngine: TranscriptionEngine {
 
     func release() async { transcriber = nil }
 }
+#else
+/// Xcode 16 ships the macOS 15 SDK, which does not declare SpeechTranscriber.
+/// Keep the engine contract buildable there; selection remains unavailable
+/// until both the compiler/SDK and operating system provide the on-device API.
+actor AppleSpeechEngine: TranscriptionEngine {
+    enum EngineError: Error, CustomStringConvertible {
+        case unsupportedSDK
+        var description: String { "Apple SpeechTranscriber requires the macOS 26 SDK" }
+    }
+
+    nonisolated let name = "apple-speech"
+    nonisolated let model = "speech-transcriber-system"
+
+    func prepare() async throws { throw EngineError.unsupportedSDK }
+    func transcribe(_ audio: URL, context: TranscriptionContext) async throws -> EngineTranscript {
+        throw EngineError.unsupportedSDK
+    }
+    func release() async {}
+}
+#endif

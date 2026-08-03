@@ -1,6 +1,6 @@
 import AVFoundation
 import Foundation
-import WhisperKit
+@preconcurrency import WhisperKit
 
 /// Whisper Large v3 Turbo, compressed for Core ML. This complements
 /// Parakeet's transducer with a sequence-to-sequence decoder, which is useful
