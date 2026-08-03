@@ -1,5 +1,3 @@
-using NAudio.Wave;
-using NAudio.Wave.SampleProviders;
 using Patchthrough.Core;
 using SherpaOnnx;
 
@@ -16,7 +14,7 @@ namespace Patchthrough.Windows.Transcription;
 /// </summary>
 public sealed class ParakeetEngine(ModelStore? models = null, int threads = 0) : ITranscriptionEngine
 {
-    private const int SampleRate = 16_000;
+    private const int SampleRate = AudioNormalizer.SampleRate;
 
     private readonly ModelStore _models = models ?? ModelStore.Default;
     private OfflineRecognizer? _recognizer;
@@ -25,10 +23,10 @@ public sealed class ParakeetEngine(ModelStore? models = null, int threads = 0) :
 
     public string Model => ModelStore.ModelName;
 
-    public Task PrepareAsync(CancellationToken cancellationToken = default)
+    public async Task PrepareAsync(CancellationToken cancellationToken = default)
     {
-        if (_recognizer is not null) return Task.CompletedTask;
-        _models.Require();
+        if (_recognizer is not null) return;
+        await _models.EnsureAsync(cancellationToken);
 
         var config = new OfflineRecognizerConfig();
         config.FeatConfig.SampleRate = SampleRate;
@@ -45,7 +43,6 @@ public sealed class ParakeetEngine(ModelStore? models = null, int threads = 0) :
         config.DecodingMethod = "greedy_search";
 
         _recognizer = new OfflineRecognizer(config);
-        return Task.CompletedTask;
     }
 
     public Task<EngineTranscript> TranscribeAsync(
@@ -56,7 +53,7 @@ public sealed class ParakeetEngine(ModelStore? models = null, int threads = 0) :
         if (_recognizer is null) throw new InvalidOperationException("the parakeet engine was used before PrepareAsync");
 
         var started = System.Diagnostics.Stopwatch.StartNew();
-        var samples = ReadMono16k(audioPath);
+        var samples = AudioNormalizer.ReadMono16k(audioPath);
         // An empty track means the recorder died before its first buffer. The
         // pipeline logs a skipped track, which is better than a zero-segment
         // transcript that looks complete.
@@ -96,41 +93,6 @@ public sealed class ParakeetEngine(ModelStore? models = null, int threads = 0) :
             Context = new EngineContextEvidence(requested, detected, []),
         };
         return Task.FromResult(transcript);
-    }
-
-    /// <summary>
-    /// Decode any container the recorder wrote, then hand back 16 kHz mono
-    /// float, which is what the model expects. Media Foundation reads both the
-    /// MP4 and the WAV fallback.
-    /// </summary>
-    private static float[] ReadMono16k(string path)
-    {
-        using var reader = new MediaFoundationReader(path);
-        ISampleProvider provider = reader.ToSampleProvider();
-
-        if (provider.WaveFormat.Channels == 2)
-        {
-            provider = new StereoToMonoSampleProvider(provider);
-        }
-        else if (provider.WaveFormat.Channels > 2)
-        {
-            // Keep the first channel. A meeting device with more than two
-            // channels is unusual, and a wrong downmix is worse than one channel.
-            provider = new MultiplexingSampleProvider([provider], 1);
-        }
-        if (provider.WaveFormat.SampleRate != SampleRate)
-        {
-            provider = new WdlResamplingSampleProvider(provider, SampleRate);
-        }
-
-        var all = new List<float>();
-        var buffer = new float[SampleRate];
-        int read;
-        while ((read = provider.Read(buffer, 0, buffer.Length)) > 0)
-        {
-            all.AddRange(buffer.Take(read));
-        }
-        return all.ToArray();
     }
 
     public ValueTask DisposeAsync()
