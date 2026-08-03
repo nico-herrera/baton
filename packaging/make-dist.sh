@@ -63,10 +63,17 @@ BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString'
 # Apple rejects notarization without the hardened runtime, and an un-notarized
 # download is exactly the Gatekeeper warning this pipeline exists to avoid.
 # Catch it here rather than after a round trip to Apple.
-codesign -d --verbose=2 "$APP" 2>&1 | grep -q 'flags=.*runtime' \
+#
+# Capture first, then match. Piping codesign straight into `grep -q` cannot work
+# under `set -o pipefail`: grep exits at the first match and closes the pipe,
+# codesign takes SIGPIPE partway through its unbuffered stderr, and pipefail
+# reports the pipeline as exit 141 — so a correctly signed bundle fails the
+# check. Do not fold these back into a pipeline.
+SIGN_INFO="$(codesign -d --verbose=2 "$APP" 2>&1)"
+grep -q 'flags=.*runtime' <<<"$SIGN_INFO" \
   || fail "bundle is not signed with the hardened runtime — notarization would be rejected"
-codesign -d --entitlements - --xml "$APP" 2>/dev/null \
-  | grep -q 'com.apple.security.device.audio-input' \
+ENTITLEMENTS="$(codesign -d --entitlements - --xml "$APP" 2>/dev/null)"
+grep -q 'com.apple.security.device.audio-input' <<<"$ENTITLEMENTS" \
   || fail "bundle is missing the audio-input entitlement — the hardened runtime
 would silently deny microphone access to every user"
 
