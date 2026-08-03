@@ -3,3 +3,4 @@
 
 # release artifacts: attached to GitHub releases, not committed
 /dist/
+CLAUDE.md
