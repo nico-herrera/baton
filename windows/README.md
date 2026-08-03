@@ -20,7 +20,8 @@ That means:
 - One directory for each session, named `yyyy.MM.dd-HHmm`.
 - `meta.json` with `duration_seconds`, `clean_stop`, and a `files` map that
   names each audio track. Write it when recording starts, so a crash leaves a
-  recoverable marker, then rewrite it on stop.
+  recoverable marker, then rewrite it on stop. A `name` key is optional, and it
+  holds a title the user gave the meeting.
 - `transcript.md`, where each spoken segment starts with
   `**[timestamp] speaker:**`. The speakers are `me` and `them`.
 - `handoff.md`, generated immediately after the transcript.

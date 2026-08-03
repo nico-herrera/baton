@@ -90,15 +90,19 @@ test('a session from another recorder reads through the same contract', (t) => {
   fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({
     duration_seconds: 92,
     clean_stop: true,
+    name: 'Windows port kickoff',
     files: { mic: 'mic.m4a', system: 'system.m4a' },
   }));
   fs.writeFileSync(path.join(dir, 'mic.m4a'), '');
   fs.writeFileSync(path.join(dir, 'system.m4a'), '');
 
   const session = resolveSession(root);
+  // The directory stays the identifier, and the name is what a reader sees.
   assert.equal(session.name, '2026.08.03-1400');
+  assert.equal(session.title, 'Windows port kickoff');
   assert.equal(session.duration, '1m32s');
   assert.equal(session.segments, 1);
+  assert.match(session.document, /^# Meeting handoff: Windows port kickoff$/m);
   assert.match(session.document, /Ship the Windows recorder/);
   assert.deepEqual(listSessions(root).map((entry) => entry.status), ['ready']);
 });
