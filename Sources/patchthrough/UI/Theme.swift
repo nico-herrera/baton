@@ -28,6 +28,8 @@ enum PT {
         static let border   = hex(0x3A3730)  // control borders
         static let menuEdge = hex(0x454138)  // popover border
         static let menuRule = hex(0x35322A)  // divider inside the destination menu
+        static let switchOffTrack = hex(0x35322A)  // settings switch track, off
+        static let switchOffKnob  = hex(0x8C887E)  // settings switch knob, off
 
         // Text, brightest to dimmest
         static let text     = hex(0xF2F0EA)  // primary
@@ -134,6 +136,12 @@ enum PT {
         static let titleBarHeight: CGFloat = 52
         static let windowMin = CGSize(width: 860, height: 660)
         static let settingsWidth: CGFloat = 560
+
+        // 10d's settings switch: 38×22 pill, 18pt knob inset 2pt.
+        static let switchTrackWidth: CGFloat = 38
+        static let switchTrackHeight: CGFloat = 22
+        static let switchKnobSize: CGFloat = 18
+        static let switchKnobInset: CGFloat = 2
 
         /// Clears the traffic lights in the custom titlebar strip.
         static let titleBarLeading: CGFloat = 88
