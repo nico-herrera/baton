@@ -319,8 +319,10 @@ function copyToClipboard(text) {
   return result.status === 0;
 }
 
-// The chat websites whose composer takes a pasted file. The app carries the
-// same table in Handoff.swift (`knownGuiTargets`); keep the two in step.
+// The chat websites whose composer takes a pasted file. The app ships the same
+// table in Handoff.swift (`knownGuiTargets`); keep the two in step. Anything
+// the user adds through `custom_destinations` in the config is a deliberate
+// divergence: see `webTargets` below.
 // `uploadsToCloud` marks a site that copies the attachment off the machine.
 const WEB_TARGETS = {
   claude: {
@@ -342,6 +344,49 @@ const WEB_TARGETS = {
     uploadsToCloud: true,
   },
 };
+
+// The shipped sites plus the user's own, from `custom_destinations` in the
+// config. Validation mirrors Config.customDestinations() in the app: an id
+// that is safe as an argument, and an http(s) URL only, because the URL
+// reaches `open`, which hands any scheme to whatever app claims it.
+let webTargetsCache = null;
+
+function webTargets(config) {
+  // Resolved once per process. Without this, the help text and the command
+  // body each re-read the config and print every warning twice.
+  if (!config && webTargetsCache) return webTargetsCache;
+  config = config || readConfig();
+  const custom = {};
+  for (const row of Array.isArray(config.custom_destinations) ? config.custom_destinations : []) {
+    const id = typeof row.id === 'string' ? row.id : '';
+    if (!id || !/^[A-Za-z0-9._-]+$/.test(id)) {
+      process.stderr.write(`warning: ignoring a custom_destinations entry: bad or missing "id"\n`);
+      continue;
+    }
+    let url;
+    try {
+      url = new URL(String(row.url));
+    } catch {
+      url = null;
+    }
+    if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) {
+      process.stderr.write(
+        `warning: ignoring custom destination "${id}": "url" must start with http:// or https://\n`
+      );
+      continue;
+    }
+    custom[id] = {
+      label: typeof row.label === 'string' && row.label ? row.label : id,
+      newChatURL: url.toString(),
+      prefillsPrompt: row.prefills_prompt !== false,
+      uploadsToCloud: row.uploads_to_cloud === true,
+      isCustom: true,
+    };
+  }
+  const resolved = { ...WEB_TARGETS, ...custom };
+  webTargetsCache = resolved;
+  return resolved;
+}
 
 // Percent-encode down to alphanumerics. `encodeURIComponent` leaves `'()*~!.-_`
 // raw, which is a different byte string than the app sends. These sites read
@@ -404,20 +449,27 @@ function autoPasteIntoBrowser(browser, settleSeconds = 5) {
 // Open a chat website with the transcript on the clipboard. Returns what the
 // caller must tell the user, because the outcome varies by site and by grant.
 function handToWeb(siteName, session, options = {}) {
-  const site = WEB_TARGETS[siteName];
+  // A resolved site object, so a config-defined destination works: it is not
+  // in the frozen shipped table.
+  const table = options.targets || webTargets();
+  const site = typeof siteName === 'string' ? table[siteName] : siteName;
   if (!site) {
-    throw new Error(`unknown web target '${siteName}'. Try: ${Object.keys(WEB_TARGETS).join(', ')}`);
+    throw new Error(`unknown web target '${siteName}'. Try: ${Object.keys(table).join(', ')}`);
   }
   if (process.platform !== 'darwin') {
     throw new Error('web handoffs need macOS, because they use the macOS clipboard');
   }
   const file = writeHandoffFile(session);
   const attached = copyFileToClipboard(file);
-  let url = site.newChatURL;
+  // Build with URL, not string concatenation: a configured URL can already
+  // carry a query or a fragment, and appending `?q=` by hand would put the
+  // query inside the fragment where the page never reads it.
+  const url = new URL(site.newChatURL);
   if (site.prefillsPrompt) {
-    url += `${url.includes('?') ? '&' : '?'}q=${pctEncoded(webPrompt(session))}`;
+    const existing = url.search.replace(/^\?/, '');
+    url.search = [existing, `q=${pctEncoded(webPrompt(session))}`].filter(Boolean).join('&');
   }
-  spawnSync('/usr/bin/open', [url]);
+  spawnSync('/usr/bin/open', [url.toString()]);
   const pasted = attached && options.autoPaste !== false
     ? autoPasteIntoBrowser(defaultBrowserName() || 'Safari')
     : false;
@@ -449,6 +501,7 @@ function launchAgent(name, prompt, cwd, env = process.env) {
 module.exports = {
   KNOWN_AGENTS,
   WEB_TARGETS,
+  webTargets,
   buildHandoffDocument,
   copyFileToClipboard,
   defaultBrowserName,

@@ -8,7 +8,11 @@ enum HandoffAlert {
     private static let accessibilitySettings =
         "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
     private static let manualPasteSuppressKey = "handoff.manualPasteExplainerSuppressed"
-    private static let cloudUploadSuppressKey = "handoff.cloudUploadWarningSuppressed"
+    /// Per destination, because the checkbox says "for this destination".
+    /// A single flag would silence the warning for every future one.
+    private static func cloudUploadSuppressKey(_ site: String) -> String {
+        "handoff.cloudUploadWarningSuppressed.\(site)"
+    }
 
     /// Shown when a clipboard handoff opened the app but the ⌘N+⌘V paste
     /// failed, which almost always means patchthrough has no Accessibility
@@ -71,7 +75,8 @@ enum HandoffAlert {
     /// cancels.
     static func confirmCloudUpload(site: String) -> Bool {
         let defaults = UserDefaults.standard
-        if defaults.bool(forKey: cloudUploadSuppressKey) { return true }
+        let suppressKey = cloudUploadSuppressKey(site)
+        if defaults.bool(forKey: suppressKey) { return true }
 
         let alert = NSAlert()
         alert.messageText = "\(site) copies the transcript to the cloud"
@@ -91,7 +96,7 @@ enum HandoffAlert {
         NSApp.activate(ignoringOtherApps: true)
         let response = alert.runModal()
         if alert.suppressionButton?.state == .on {
-            defaults.set(true, forKey: cloudUploadSuppressKey)
+            defaults.set(true, forKey: suppressKey)
         }
         return response == .alertFirstButtonReturn
     }

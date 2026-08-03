@@ -20,6 +20,7 @@ final class MenuBarController {
         let terminal: [Entry]     // remainder, CLI
         let app: [Entry]          // remainder, installed apps
         let web: [Entry]          // remainder, browser doors
+        let custom: [Entry]       // remainder, the user's own config
         let top: Entry?
         let latestTimeLabel: String?   // "9:45 PM"
         let sessionCount: Int
@@ -35,7 +36,7 @@ final class MenuBarController {
     private var recordingDot: NSView?
     private var isRecording = false
     private var model = HandoffMenuModel(
-        mostUsed: [], terminal: [], app: [], web: [], top: nil, latestTimeLabel: nil, sessionCount: 0
+        mostUsed: [], terminal: [], app: [], web: [], custom: [], top: nil, latestTimeLabel: nil, sessionCount: 0
     )
 
     var onToggle: (() -> Void)?
@@ -192,7 +193,7 @@ final class MenuBarController {
         let sub = handoffItem.submenu ?? NSMenu()
         sub.removeAllItems()
         let hasAny = !(model.mostUsed.isEmpty && model.terminal.isEmpty
-                       && model.app.isEmpty && model.web.isEmpty)
+                       && model.app.isEmpty && model.web.isEmpty && model.custom.isEmpty)
         handoffItem.isEnabled = hasAny && model.latestTimeLabel != nil && !isRecording
 
         func add(_ entries: [HandoffMenuModel.Entry], header: String) {
@@ -213,6 +214,7 @@ final class MenuBarController {
         add(model.terminal, header: "Terminal")
         add(model.app, header: "App")
         add(model.web, header: "Web")
+        add(model.custom, header: "Custom")
         handoffItem.submenu = sub
     }
 

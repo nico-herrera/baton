@@ -86,6 +86,9 @@ enum Handoff {
         let id: String        // stable identifier for CLI/menu
         let label: String     // human-readable menu title
         let kind: Kind
+        /// The user defined this one in their config file. It groups under its
+        /// own menu heading, so a private tool never looks like a shipped one.
+        var isCustom = false
 
         enum Kind {
             case vscodeChat                      // code chat -n -a <file> "<prompt>"
@@ -197,9 +200,28 @@ enum Handoff {
         FileManager.default.fileExists(atPath: "/Applications/\(name).app")
     }
 
-    /// GUI targets actually available on this machine.
+    /// The user's own destinations, from `custom_destinations` in the config.
+    /// They reuse the `.webChat` kind, so they inherit the whole browser launch
+    /// path instead of duplicating it. Ids carry a `custom-` prefix so a
+    /// config entry can never shadow a shipped target.
+    static func customGuiTargets() -> [GuiTarget] {
+        Config.customDestinations().map { d in
+            GuiTarget(
+                id: "custom-\(d.id)",
+                label: d.label,
+                kind: .webChat(GuiTarget.Site(newChatURL: d.url.absoluteString,
+                                              prefillsPrompt: d.prefillsPrompt,
+                                              uploadsToCloud: d.uploadsToCloud)),
+                isCustom: true
+            )
+        }
+    }
+
+    /// GUI targets actually available on this machine. The only reader of
+    /// `knownGuiTargets`, so adding the custom ones here reaches every menu,
+    /// the CLI listing, and dispatch at once.
     static func installedGuiTargets() -> [GuiTarget] {
-        knownGuiTargets.filter { target in
+        let shipped = knownGuiTargets.filter { target in
             switch target.kind {
             case .vscodeChat: return vscodeCLI() != nil
             case .cursorDeeplink: return cursorCLI() != nil || appInstalled("Cursor")
@@ -212,15 +234,21 @@ enum Handoff {
                 return true
             }
         }
+        return shipped + customGuiTargets()
     }
 
     /// Open the handoff in a GUI. For vscode/cursor the transcript is staged
     /// in `repo`; for the chat apps the handoff file rides along on the
     /// clipboard so no file access is needed.
-    static func launchGui(target: GuiTarget, session: Session, repo: URL?) {
+    ///
+    /// Returns false when the destination did not open. Callers must not
+    /// synthesize a paste after a false: the keystrokes would go to whatever
+    /// window is frontmost instead.
+    @discardableResult
+    static func launchGui(target: GuiTarget, session: Session, repo: URL?) -> Bool {
         switch target.kind {
         case .vscodeChat:
-            guard let code = vscodeCLI(), let repo else { return }
+            guard let code = vscodeCLI(), let repo else { return false }
             let staged = try? stage(session: session, inRepo: repo)
             let p = Process()
             p.executableURL = URL(fileURLWithPath: code)
@@ -232,7 +260,7 @@ enum Handoff {
             try? p.run()
 
         case .cursorDeeplink:
-            guard let repo else { return }
+            guard let repo else { return false }
             _ = try? stage(session: session, inRepo: repo)
             if let cursor = cursorCLI() {
                 let openRepo = Process()
@@ -286,7 +314,7 @@ enum Handoff {
             // out of commits), and the deeplink prompt points at it. The app
             // slices q at 1024 characters, which the shared prompt fits. No
             // clipboard, no keystrokes.
-            guard let repo else { return }
+            guard let repo else { return false }
             _ = try? stage(session: session, inRepo: repo)
             openClaudeDeeplink(host: "code", query: [
                 ("q", prompt(for: session)),
@@ -297,17 +325,39 @@ enum Handoff {
             // Same clipboard payload as the desktop chat apps. The browser
             // turns a pasted file reference into an attachment, so one paste
             // finishes the handoff, and no app has to be installed.
+            //
+            // Build the URL before touching the clipboard. A URL that never
+            // opens still leaves the caller ready to synthesize ⌘V, and that
+            // paste would land in whatever window is frontmost.
+            guard let url = webURL(site: site, session: session) else { return false }
             copyFileReference(exportHandoffFile(for: session))
-            var url = site.newChatURL
-            if site.prefillsPrompt {
-                url += (url.contains("?") ? "&" : "?") + "q=\(pctEncoded(webPrompt(for: session)))"
-            }
             let open = Process()
             open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            open.arguments = [url]
-            try? open.run()
+            open.arguments = [url.absoluteString]
+            do { try open.run() } catch { return false }
             open.waitUntilExit()
+            return open.terminationStatus == 0
         }
+        return true
+    }
+
+    /// The site's new-chat URL with the prompt added as a `q` item.
+    /// `URLComponents` rather than string concatenation: a configured URL can
+    /// already carry a query or a fragment, and appending `?q=` by hand puts
+    /// the query inside the fragment where the page never sees it.
+    private static func webURL(site: GuiTarget.Site, session: Session) -> URL? {
+        guard var components = URLComponents(string: site.newChatURL) else { return nil }
+        if site.prefillsPrompt {
+            // These pages parse the query with URLSearchParams, which decodes
+            // `+` as a space, so the value is encoded down to alphanumerics
+            // and set directly rather than through `queryItems`.
+            let encoded = "q=\(pctEncoded(webPrompt(for: session)))"
+            components.percentEncodedQuery = [components.percentEncodedQuery, encoded]
+                .compactMap { $0 }
+                .filter { !$0.isEmpty }
+                .joined(separator: "&")
+        }
+        return components.url
     }
 
     /// `claude://<host>/new?<query>`. Values are percent-encoded down to

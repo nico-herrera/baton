@@ -106,7 +106,9 @@ struct Hand: ParsableCommand {
                 print("staged; would open \(target.label)")
                 return
             }
-            Handoff.launchGui(target: target, session: sess, repo: repo)
+            guard Handoff.launchGui(target: target, session: sess, repo: repo) else {
+                throw ValidationError("couldn't open \(target.label)")
+            }
             FileHandle.standardError.write(Data("→ \(target.label)\n".utf8))
             let paste: (app: String, newChat: Bool)?
             switch target.kind {
@@ -485,6 +487,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             terminal: rest.filter { $0.category == .terminal }.map(entry),
             app: rest.filter { $0.category == .app }.map(entry),
             web: rest.filter { $0.category == .web }.map(entry),
+            custom: rest.filter { $0.category == .custom }.map(entry),
             top: top3.first.map(entry),
             latestTimeLabel: latest?.date.map { $0.formatted(date: .omitted, time: .shortened) }
                 ?? latest?.id,
@@ -515,7 +518,11 @@ final class AppController: NSObject, NSApplicationDelegate {
                    !HandoffAlert.confirmCloudUpload(site: target.label) {
                     return
                 }
-                Handoff.launchGui(target: target, session: session, repo: nil)
+                guard Handoff.launchGui(target: target, session: session, repo: nil) else {
+                    notifyUser(title: "Patchthrough: handoff failed",
+                               body: "Could not open \(target.label).")
+                    return
+                }
                 switch target.kind {
                 case .appClipboard(let appName):
                     // With auto-paste on, the paste landing in the app is the
