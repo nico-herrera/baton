@@ -22,7 +22,11 @@ expect(packageJson.repository.directory === 'cli', 'repository directory must po
 
 const executable = path.join(__dirname, packageJson.bin.patchthrough);
 expect(fs.existsSync(executable), `missing ${packageJson.bin.patchthrough}`);
-expect((fs.statSync(executable).mode & 0o111) !== 0, `${packageJson.bin.patchthrough} is not executable`);
+// Windows has no execute bit, and npm writes the shim from the `bin` field
+// there instead. Check the mode only where the mode carries meaning.
+if (process.platform !== 'win32') {
+  expect((fs.statSync(executable).mode & 0o111) !== 0, `${packageJson.bin.patchthrough} is not executable`);
+}
 expect(fs.existsSync(path.join(__dirname, 'README.md')), 'missing CLI README');
 expect(fs.existsSync(path.join(__dirname, 'LICENSE')), 'missing CLI license');
 

@@ -98,10 +98,12 @@ patchthrough hand --web claude      # open a chat site, transcript on the clipbo
 ```
 
 `--web claude`, `--web chatgpt`, `--web m365`, and any id from `custom_destinations` need
-macOS, because they use the macOS clipboard. They need no repository and no installed app. One paste (⌘V) attaches the
-transcript. The CLI cannot paste for you as reliably as the app can: macOS gives
-Accessibility to the terminal that runs the command, not to Patchthrough, so without
-that grant the CLI tells you to paste instead of pretending it did.
+macOS or Windows, because they use the system clipboard. They need no repository and no
+installed app. One paste attaches the transcript: ⌘V on macOS, Ctrl+V on Windows. The CLI
+cannot paste for you as reliably as the app can: macOS gives Accessibility to the terminal
+that runs the command, not to Patchthrough, so without that grant the CLI tells you to
+paste instead of pretending it did. Windows never pastes for you, because a synthesized
+keystroke there has no reliable focus guarantee.
 
 The CLI reads the sessions that the app writes. It also accepts any transcript file or
 input on stdin, so you can use the CLI without the app. See [`cli/`](cli/) for the full
