@@ -1,10 +1,49 @@
 # Windows recorder
 
-This directory is empty. It holds the plan for a Windows recorder, and nothing
-is built yet. The macOS app in `Sources/` stays the only recorder today.
-
 Read [`schemas/session-v1.md`](../schemas/session-v1.md) first. That contract is
 the whole interface between a recorder and everything downstream.
+
+## State
+
+Milestone 1 is partly built. Be careful about what is verified here.
+
+| Part | State | Verified how |
+|---|---|---|
+| Session format: meta.json, transcript.md, handoff.md | done | 24 unit tests, and `verify-contract.sh` reads a generated session with the real npm CLI |
+| Silence padding arithmetic | done | unit tests, including a two-hour gap |
+| Audio capture through WASAPI | written | **compiles only.** It has never run |
+| AAC encoding through Media Foundation | written | **compiles only.** It has never run |
+| Transcription | not started | the `ITranscriptionEngine` seam exists, with no engine behind it |
+| Tray application | not started | milestone 2 |
+
+`Patchthrough.Core` targets `net8.0` and holds everything that does not need
+Windows, so the session format stays testable on any machine. That split is
+deliberate: the format is the part that must be right, and it is the part a Mac
+can check.
+
+`Patchthrough.Windows` targets `net8.0-windows` and holds the audio. It builds
+on macOS and Linux through `EnableWindowsTargeting`, which type-checks every
+call into NAudio. A compile is not a run. Nobody has yet confirmed that this
+code captures a single sample.
+
+## Build and check
+
+```sh
+cd windows
+dotnet test              # the session format and the padding arithmetic
+./verify-contract.sh     # writes a session, then reads it with the npm CLI
+```
+
+`verify-contract.sh` is the interesting one. It generates a session with the
+real `Patchthrough.Core` code path and hands it to `cli/bin/patchthrough.js`,
+which is the definition of done for milestone 1.
+
+## What is left in milestone 1
+
+1. Run the recorder on Windows. Confirm that both tracks capture, and that a
+   meeting with a long silence in the middle keeps its two tracks aligned.
+2. Add a transcription engine behind `ITranscriptionEngine`.
+3. Wire the pipeline into `Patchthrough rec`, so a session arrives transcribed.
 
 ## What a Windows recorder has to do
 

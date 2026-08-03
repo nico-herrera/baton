@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <AssemblyName>Patchthrough</AssemblyName>
+    <RootNamespace>Patchthrough.Windows</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Lets this project compile on macOS and Linux. It cannot run there, but
+         a compile catches every wrong API name and signature. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The narrow packages on purpose. The NAudio meta-package pulls in
+         NAudio.WinForms, whose framework reference does not resolve off
+         Windows, and this project has no forms. -->
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Patchthrough.Core\Patchthrough.Core.csproj" />
+  </ItemGroup>
+
+</Project>
