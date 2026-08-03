@@ -11,9 +11,9 @@ struct Patchthrough: ParsableCommand {
             return version
         }
 
-        // CLI invocations commonly arrive through ~/.local/bin/patchthrough.
-        // Resolve that symlink back into the app bundle so `--version` reports
-        // the same value Finder and npm expose.
+        // Direct diagnostic invocations can still arrive through a symlink.
+        // Resolve it back into the app bundle so `--version` reports the same
+        // value Finder exposes.
         let executable = URL(fileURLWithPath: CommandLine.arguments[0])
             .resolvingSymlinksInPath()
         let app = executable
@@ -322,6 +322,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var rootWatcher: DispatchSourceFileSystemObject?
 
     init(root: URL) {
+        Self.removeLegacyCLISymlink()
         self.root = root
         let store = SessionStore(root: root)
         self.store = store
@@ -373,6 +374,23 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
 
         watchRecordingsRoot()
+    }
+
+    /// Source builds before the standalone npm CLI created this symlink. Only
+    /// remove it when it resolves to this exact app executable; a real npm
+    /// command, or a symlink the user owns for another purpose, is untouched.
+    private static func removeLegacyCLISymlink() {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let legacy = home
+            .appendingPathComponent(".local/bin/patchthrough")
+        guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: legacy.path)
+        else { return }
+        let oldAppTarget = home
+            .appendingPathComponent("Applications/patchthrough.app/Contents/MacOS/patchthrough")
+            .path
+        let currentTarget = Bundle.main.executableURL?.path
+        guard target == oldAppTarget || target == currentTarget else { return }
+        try? FileManager.default.removeItem(at: legacy)
     }
 
     @objc private func openWindowFromAppleEvent(_ event: NSAppleEventDescriptor,

@@ -56,6 +56,25 @@ actor TranscriptionCoordinator {
         ) else { return }
 
         let fm = FileManager.default
+        // handoff.md became part of the public session contract after the
+        // first releases. Backfill it for older completed sessions so the npm
+        // CLI consumes the same canonical document as the app.
+        let missingHandoffs = entries.filter {
+            fm.fileExists(atPath: $0.appendingPathComponent("transcript.md").path)
+                && !fm.fileExists(atPath: $0.appendingPathComponent("handoff.md").path)
+        }
+        for dir in missingHandoffs {
+            do {
+                let session = try Handoff.resolveSession(
+                    named: dir.lastPathComponent,
+                    root: root
+                )
+                try Handoff.writeHandoffFile(for: session)
+            } catch {
+                log(dir, "could not create handoff.md: \(error)")
+            }
+        }
+
         let pending = entries
             .filter {
                 fm.fileExists(atPath: $0.appendingPathComponent("meta.json").path)
@@ -169,6 +188,18 @@ actor TranscriptionCoordinator {
             segments: merged
         )
         try transcript.write(to: dir)
+        do {
+            let session = try Handoff.resolveSession(
+                named: dir.lastPathComponent,
+                root: dir.deletingLastPathComponent()
+            )
+            try Handoff.writeHandoffFile(for: session)
+        } catch {
+            // transcript.json is the durable completion marker. A secondary
+            // handoff-file failure should be visible but must not turn a good
+            // transcription into a permanently non-retryable failure.
+            log(dir, "could not create handoff.md: \(error)")
+        }
         log(dir, "done — \(merged.count) segments")
     }
 

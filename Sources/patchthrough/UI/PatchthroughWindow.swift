@@ -937,9 +937,8 @@ struct PatchthroughRootView: View {
 
 // MARK: - Settings (round 10d)
 
-/// Fixed frame, no scrolling. Four groups: Recordings, Transcription,
-/// Patch through, After each transcript. Every toggle carries a one-line
-/// subtitle stating its tradeoff.
+/// Fixed frame, no scrolling. Every toggle carries a one-line subtitle
+/// stating its tradeoff.
 struct SettingsView: View {
     @ObservedObject var store: SessionStore
     @Environment(\.dismiss) private var dismiss
@@ -948,6 +947,7 @@ struct SettingsView: View {
     @State private var transcribe = true
     @State private var voiceProcessing = false
     @State private var autoPaste = false
+    @State private var launchAtLogin = false
     @State private var onStop = ""
     @State private var terminalID = TerminalApp.known[0].id
     @State private var error: String?
@@ -972,6 +972,11 @@ struct SettingsView: View {
                         chip("Choose…", hPad: 12) { chooseFolder() }
                     }
                     caption("Applies to the next recording. Existing sessions stay where they are.")
+                    card {
+                        toggleRow("Open Patchthrough at login",
+                                  subtitle: "Keeps the menu-bar recorder ready in the background",
+                                  isOn: $launchAtLogin)
+                    }
                 }
 
                 section("Transcription") {
@@ -1235,6 +1240,7 @@ struct SettingsView: View {
         transcribe = Config.transcriptionEnabledValue()
         voiceProcessing = Config.micVoiceProcessing()
         autoPaste = Config.autoPaste()
+        launchAtLogin = LaunchAtLogin.isEnabled
         onStop = Config.onStop() ?? ""
         terminalID = TerminalApp.current().id
     }
@@ -1264,6 +1270,9 @@ struct SettingsView: View {
                 // holding deliberate overrides only.
                 "terminal": terminalID == TerminalApp.known[0].id ? nil : terminalID,
             ])
+            if launchAtLogin != LaunchAtLogin.isEnabled {
+                try LaunchAtLogin.setEnabled(launchAtLogin)
+            }
             store.lastAction = "settings saved"
             dismiss()
         } catch {
