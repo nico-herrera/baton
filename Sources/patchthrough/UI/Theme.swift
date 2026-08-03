@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 // Design tokens. Per design/DESIGN_RULES.md rule 1, this file is the ONLY place
-// raw values may appear — views reference PT.C / PT.F / PT.M and nothing else.
+// raw values may appear. Views reference PT.C / PT.F / PT.M and nothing else.
 //
 // Generated from "Patchthrough App Redesign.dc.html" rounds 11a / 10d / 10e and
 // the handoff's swift/Theme.swift. Every number is deliberate; fractional sizes
@@ -41,7 +41,7 @@ enum PT {
 
         static let speakerThem = hex(0x8C887E)  // THEM label, repo chip
 
-        // Accent — Signal red. Permitted on exactly the five uses in rule 2.
+        // Accent: Signal red. Permitted on exactly the five uses in rule 2.
         static let signal    = hex(0xD2371B)  // fills: primary button, record dot
         static let signalDim = hex(0xB72E14)  // split-button chevron half
         static let signalLit = hex(0xE4633F)  // signal-on-dark TEXT and icons
@@ -87,17 +87,17 @@ enum PT {
         static let menuItem     = Font.system(size: 12.5)
         static let menuItemStrong = Font.system(size: 12.5, weight: .medium)
         /// Split-button chevron. The mock's `#i-chev` sits in a 13pt box but its
-        /// path only spans 6.8 of 16 grid units — 5.5pt of centreline plus a
+        /// path only spans 6.8 of 16 grid units: 5.5pt of centreline plus a
         /// 1.3pt stroke, so ~6.8pt wide overall. SF `chevron.down` renders about
         /// 0.83pt of width per point of font size, hence 8.
         static let chevron      = Font.system(size: 8, weight: .medium)
         /// The arrow in the primary half. The mock's `#i-arrow` is drawn in a
-        /// 14pt box but its stroke only spans 9.4 of 16 grid units — about 8pt
+        /// 14pt box but its stroke only spans 9.4 of 16 grid units, about 8pt
         /// wide at a 1.3 stroke, so it is smaller and lighter than the label.
         static let buttonGlyph  = Font.system(size: 10.5, weight: .medium)
 
         // SF Symbol sizes, matching the mock's SVG boxes. These are icons, not
-        // text — never size a glyph with a mono or body token.
+        // text. Never size a glyph with a mono or body token.
         static let icon         = Font.system(size: 13)    // drag, search, footer folder
         static let iconSmall    = Font.system(size: 12)    // detail-header folder, status
         static let gear         = Font.system(size: 15)
@@ -117,7 +117,7 @@ enum PT {
         /// The mock's transcript line box is 14.5 × 1.62 = 23.49pt; the system
         /// font's own line height at 14.5pt is 17.08, so lineSpacing carries the
         /// 6.41 difference. SwiftUI adds it per line rather than between lines,
-        /// so an N-line block measures N × 23.49 — exactly the CSS box. Do not
+        /// so an N-line block measures N × 23.49, exactly the CSS box. Do not
         /// also pad vertically; that double-counts the leading.
         ///
         /// NOTE: the handoff's swift/Theme.swift says 4 here. Measured against
@@ -199,18 +199,18 @@ enum PT {
         static let statusItemSize: CGFloat = 18
         static let recordDotSize: CGFloat = 7
         static let menuGlyphSize: CGFloat = 10
-        /// The dot pulses 1.6s ease-in-out — the app's only animation (rule 14).
-        /// Autoreversing, so each half is 0.8s.
+        /// The dot pulses 1.6s ease-in-out. The pulse is the app's only
+        /// animation (rule 14). It autoreverses, so each half is 0.8s.
         static let pulseHalfPeriod: CFTimeInterval = 0.8
     }
 
     // MARK: - AppKit bridge
     //
     // The status item and its menu are NSMenu/NSImage, which cannot take a
-    // SwiftUI Color. Same tokens, AppKit types — do not re-enter raw hex here.
+    // SwiftUI Color. Same tokens, AppKit types. Do not re-enter raw hex here.
 
     enum NS {
-        /// sRGB, not `calibratedRed:` — generic RGB renders #D2371B as #DD4D22,
+        /// sRGB, not `calibratedRed:`. Generic RGB renders #D2371B as #DD4D22,
         /// a visibly brighter red than the rest of the app's Signal.
         static let signal = NSColor(srgbRed: 0xD2 / 255, green: 0x37 / 255,
                                     blue: 0x1B / 255, alpha: 1)
@@ -230,8 +230,8 @@ extension Color {
 }
 
 /// The Patchthrough mark on its native 24×24 grid, from
-/// logo/CLAUDE_CODE_HANDOFF.md — drawn as a Shape so it is crisp at every size
-/// and follows the foreground colour.
+/// logo/CLAUDE_CODE_HANDOFF.md. A Shape draws the mark, so the mark stays crisp
+/// at every size and follows the foreground colour.
 struct PatchthroughMark: Shape {
     /// Stroke weight in grid units: 1.6 regular, 2.1 heavy.
     var weight: CGFloat = 1.6

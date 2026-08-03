@@ -32,7 +32,7 @@ enum DoctorReport {
         case .notDetermined:
             return Check(
                 name: "microphone",
-                status: .warn("not yet requested — will prompt on first recording"),
+                status: .warn("not yet requested. macOS prompts on the first recording"),
                 remediation: "start a recording once; macOS will prompt"
             )
         case .denied, .restricted:
@@ -51,7 +51,7 @@ enum DoctorReport {
     static func checkSystemAudio() -> Check {
         Check(
             name: "system audio",
-            status: .warn("state unknowable until first use — will prompt on first recording"),
+            status: .warn("state unknowable until first use. macOS prompts on the first recording"),
             remediation: "if recordings come out silent: System Settings → Privacy & Security → Screen & System Audio Recording"
         )
     }
@@ -93,7 +93,7 @@ enum DoctorReport {
         return Check(
             name: "transcription",
             status: .warn("parakeet models not downloaded (~600 MB)"),
-            remediation: "downloads automatically on first transcription — record a short test session while online"
+            remediation: "the models download automatically on the first transcription. Record a short test session while online"
         )
     }
 

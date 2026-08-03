@@ -1,6 +1,6 @@
 # Reviewed model baseline for patchthrough.
 # Regenerate with: ./packaging/verify-models.sh --update
-# Baselined 2026-07-31 01:23:10Z — 22 files, 451M
+# Baselined 2026-07-31 01:23:10Z: 22 files, 451M
 # Source: FluidAudio downloads these from HuggingFace at runtime.
 46de1a6fe2e49d19a2125bc91acf020df7f2aea84ba821532aade8427a440b05  ./parakeet-tdt-0.6b-v2/Decoder.mlmodelc/analytics/coremldata.bin
 d200ca07694a347f6d02a3886a062ae839831e094e443222f2e48a14945966a8  ./parakeet-tdt-0.6b-v2/Decoder.mlmodelc/coremldata.bin

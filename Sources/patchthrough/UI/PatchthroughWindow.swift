@@ -1,9 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// Observable model behind the main window. All UI state lives here; the
+/// Observable model behind the main window. All UI state lives here, and the
 /// views are dumb. Layout and behaviour follow APP_REDESIGN_HANDOFF.md
-/// (round 11a window, 10d settings) — deviations are bugs.
+/// (round 11a window, 10d settings). Any deviation is a bug.
 @MainActor
 final class SessionStore: ObservableObject {
 
@@ -19,7 +19,7 @@ final class SessionStore: ObservableObject {
 
         enum Status { case ready, pending, broken }
 
-        /// First thing said — the only human-readable identifier a session has.
+        /// The first thing said. A session has no other human-readable identifier.
         var firstLine: String { segments.first?.text ?? "" }
 
         var statusSymbol: String {
@@ -33,7 +33,7 @@ final class SessionStore: ObservableObject {
             switch status {
             case .ready:   return "\(duration) · \(words) words" + (cleanStop ? "" : " · truncated")
             case .pending: return "transcribing…"
-            case .broken:  return "interrupted — no meta.json"
+            case .broken:  return "interrupted: no meta.json"
             }
         }
     }
@@ -61,12 +61,12 @@ final class SessionStore: ObservableObject {
         let isTerminal: Bool
         let needsRepo: Bool
 
-        var shortLabel: String { label.components(separatedBy: " — ").first ?? label }
+        var shortLabel: String { label.components(separatedBy: " (").first ?? label }
 
-        /// The menu keeps meaningful product context ("Copilot — VS Code")
-        /// but drops launch-mechanism notes that are not destination names.
+        /// The menu keeps meaningful product context ("Copilot (VS Code)") but
+        /// drops launch-mechanism notes that are not destination names.
         var menuLabel: String {
-            for suffix in [" — attach transcript", " — session folder", " — ChatGPT app"]
+            for suffix in [" (attach transcript)", " (session folder)", " (ChatGPT app)"]
             where label.hasSuffix(suffix) {
                 return String(label.dropLast(suffix.count))
             }
@@ -160,7 +160,7 @@ final class SessionStore: ObservableObject {
         return rankedDestinations.first
     }
 
-    /// The repo chip's display name — just the folder, full path in tooltip.
+    /// The repo chip's display name: the folder only. The tooltip has the path.
     var repoDisplayName: String? {
         let trimmed = repoPath.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return nil }
@@ -275,8 +275,8 @@ final class SessionStore: ObservableObject {
             switch target.kind {
             case .appClipboard:
                 lastAction = Config.autoPaste()
-                    ? "\(dest.shortLabel) opened — pasting into a new chat…"
-                    : "\(dest.shortLabel) opened — prompt + transcript on your clipboard (⌘V)"
+                    ? "\(dest.shortLabel) opened. Pasting into a new chat…"
+                    : "\(dest.shortLabel) opened. Prompt and transcript are on your clipboard (⌘V)"
             case .fileOpen:
                 lastAction = "\(dest.shortLabel) opened with the transcript attached (⌘V for instructions)"
             case .folderOpen:
@@ -312,7 +312,7 @@ final class SessionStore: ObservableObject {
 
     func pickRepo() -> URL? {
         let panel = NSOpenPanel()
-        panel.message = "Choose the project this meeting was about — the session starts there."
+        panel.message = "Choose the project this meeting was about. The session starts in that folder."
         panel.prompt = "Use this folder"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -330,7 +330,7 @@ final class SessionStore: ObservableObject {
 struct PatchthroughRootView: View {
     @ObservedObject var store: SessionStore
     /// The sidebar search field is hand-built (see `searchField`), so ⌘F has
-    /// to be wired up by hand too — `.searchable` used to supply it.
+    /// to be wired up by hand too. `.searchable` used to supply ⌘F.
     @FocusState private var searchFocused: Bool
     @State private var showDestinationMenu = false
     @State private var hoveredDestination: String?
@@ -364,8 +364,8 @@ struct PatchthroughRootView: View {
             }
         }
         // The strip below is the titlebar, so the content must not be inset
-        // for the system one — otherwise the window opens 28pt taller than
-        // 11a and everything sits a titlebar's height too low.
+        // for the system titlebar. An inset opens the window 28pt taller than
+        // 11a, and everything sits a titlebar's height too low.
         .ignoresSafeArea(.container, edges: .top)
         .frame(minWidth: PT.M.windowMin.width, minHeight: PT.M.windowMin.height)
         .background(PT.C.window)
@@ -389,7 +389,7 @@ struct PatchthroughRootView: View {
         }
     }
 
-    // MARK: Titlebar — mark + wordmark left; Drag, split button, gear right.
+    // MARK: Titlebar: mark and wordmark left; Drag, split button, gear right.
     //
     // Drawn in SwiftUI rather than as an NSToolbar on purpose. 11a's titlebar
     // is a flat #201F1A strip with a two-tone red split button and unbordered
@@ -421,8 +421,8 @@ struct PatchthroughRootView: View {
             patchSplitButton
 
             // SF `gearshape`, not the mock's own `#i-gear` glyph: that one is a
-            // ring with eight radial spokes, which reads as a sun — i.e. a
-            // light/dark toggle. This app is dark-only, so that reading is a
+            // ring with eight radial spokes, which reads as a sun. A sun reads
+            // as a light/dark toggle. This app is dark-only, so that reading is a
             // dead end and Settings needs to be unmistakable. Deliberate
             // deviation from 11a; don't "fix" it back.
             Button { store.showSettings = true } label: {
@@ -442,7 +442,7 @@ struct PatchthroughRootView: View {
     }
 
     /// Mock: bg #24231D, 1px #3A3730, radius 7, padding 8/11. The glyph is the
-    /// mock's `#i-drag` — a page with an up arrow, i.e. `arrow.up.doc`.
+    /// mock's `#i-drag`, a page with an up arrow, which is `arrow.up.doc`.
     private var dragChip: some View {
         HStack(spacing: 7) {
             Image(systemName: "arrow.up.doc")
@@ -598,7 +598,7 @@ struct PatchthroughRootView: View {
 
                 Spacer(minLength: 0)
 
-                // Never show a count of 0 — omit the suffix instead.
+                // Never show a count of 0. Omit the suffix instead.
                 if count > 0 {
                     Text("\(count)×")
                         .font(PT.F.monoTiny)
@@ -631,12 +631,12 @@ struct PatchthroughRootView: View {
         hoveredDestination = nil
     }
 
-    // MARK: Sidebar — time + first transcript line.
+    // MARK: Sidebar: time and first transcript line.
 
     /// A ScrollView, not a List: `.listStyle(.sidebar)` adds ~16pt of its own
     /// horizontal inset on top of any `listRowInsets`, which pushes the row fill
-    /// in from the 8pt the mock specifies. Nothing here needs List behaviour —
-    /// selection draws its own fill and ring (rule 4).
+    /// in from the 8pt the mock specifies. Nothing here needs List behaviour.
+    /// Selection draws its own fill and ring (rule 4).
     private var sessionList: some View {
         VStack(spacing: 0) {
             searchField
@@ -670,9 +670,9 @@ struct PatchthroughRootView: View {
         .background(PT.C.sidebar)
     }
 
-    /// Mock: the search field lives at the top of the sidebar — bg #24231D on
-    /// #302E27, radius 6, padding 6/9. A native `.searchable` would put it in
-    /// the toolbar instead.
+    /// Mock: the search field lives at the top of the sidebar, with bg #24231D
+    /// on #302E27, radius 6, and padding 6/9. A native `.searchable` would put
+    /// the field in the toolbar instead.
     private var searchField: some View {
         HStack(spacing: 7) {
             Image(systemName: "magnifyingglass")
@@ -734,7 +734,7 @@ struct PatchthroughRootView: View {
     private func sidebarRow(_ item: SessionStore.Item, selected: Bool) -> some View {
         Group {
             if item.status == .ready {
-                // Selection brightens both lines and warms the duration — that
+                // Selection brightens both lines and warms the duration. That
                 // warm tone is the only place the accent reaches text.
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
@@ -846,7 +846,7 @@ struct PatchthroughRootView: View {
     }
 
     /// One row: session id (mono), stats, and the target repo as just the
-    /// folder name on the trailing edge — full path in the tooltip.
+    /// folder name on the trailing edge. The tooltip carries the full path.
     private func detailHeader(_ item: SessionStore.Item) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(item.id).font(PT.F.mono)
@@ -875,11 +875,11 @@ struct PatchthroughRootView: View {
         .padding(.bottom, 12)
     }
 
-    // MARK: Transcript — me right on a ground, them left and bare.
+    // MARK: Transcript: me on the right on a ground, them on the left and bare.
 
     private func transcriptView(_ item: SessionStore.Item) -> some View {
         GeometryReader { geo in
-            // 78% of the padded content box — see PT.M.turnMaxWidthFraction.
+            // 78% of the padded content box. See PT.M.turnMaxWidthFraction.
             let cap = (geo.size.width - PT.M.transcriptPad * 2)
                 * PT.M.turnMaxWidthFraction
             ScrollView {
@@ -953,7 +953,7 @@ struct SettingsView: View {
     @State private var error: String?
     @FocusState private var focused: Field?
 
-    /// Only terminals actually on this Mac — offering an absent one produces a
+    /// Only terminals that are on this Mac. An absent terminal produces a
     /// handoff that silently does nothing.
     private let terminals = TerminalApp.installed()
 
@@ -1006,8 +1006,8 @@ struct SettingsView: View {
                         }
                     }
                     // The Accessibility strip lives inside the card, directly
-                    // under the switch it gates — in small print elsewhere
-                    // nobody connects the two.
+                    // under the switch that it gates. In small print elsewhere,
+                    // nobody connects the strip to the switch.
                     card {
                         VStack(spacing: 0) {
                             toggleRow("Paste automatically after a clipboard handoff",
@@ -1015,7 +1015,7 @@ struct SettingsView: View {
                                       isOn: $autoPaste)
                             Rectangle().fill(PT.C.border2).frame(height: 1)
                             HStack(spacing: 8) {
-                                Text("Requires Accessibility permission — macOS will ask once.")
+                                Text("Requires Accessibility permission. macOS asks once.")
                                     .font(PT.F.caption)
                                     .foregroundStyle(PT.C.signalWarn)
                                 Spacer()
@@ -1091,7 +1091,7 @@ struct SettingsView: View {
         }
     }
 
-    /// Sunken monospaced input — mock: #17160F on a #35322A border, radius 6.
+    /// Sunken monospaced input. Mock: #17160F on a #35322A border, radius 6.
     private func well(text: Binding<String>, placeholder: String) -> some View {
         TextField("", text: text, prompt:
             Text(placeholder).foregroundColor(PT.C.text5))
@@ -1107,7 +1107,7 @@ struct SettingsView: View {
             )
     }
 
-    /// Neutral chip — mock: #2A2822 on #3A3730, radius 6. Drawn rather than
+    /// Neutral chip. Mock: #2A2822 on #3A3730, radius 6. Drawn rather than
     /// styled, because the sheet's Signal tint colours native buttons red and
     /// red is reserved for Save.
     private func chip(_ title: String, hPad: CGFloat,
@@ -1134,7 +1134,7 @@ struct SettingsView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Toggle ground — mock: #24231D on #302E27, radius 8.
+    /// Toggle ground. Mock: #24231D on #302E27, radius 8.
     private func card(@ViewBuilder content: () -> some View) -> some View {
         content()
             .frame(maxWidth: .infinity)
@@ -1146,8 +1146,8 @@ struct SettingsView: View {
             .clipShape(RoundedRectangle(cornerRadius: PT.M.cardRadius))
     }
 
-    /// Header carries the mark and the config path — the file being edited is
-    /// never a mystery.
+    /// Header carries the mark and the config path, so you always know which
+    /// file you edit.
     private var header: some View {
         HStack {
             HStack(spacing: 10) {
@@ -1311,7 +1311,7 @@ final class PatchthroughWindowController: NSObject, NSWindowDelegate {
             w.titleVisibility = .hidden
             w.isReleasedWhenClosed = false
             w.delegate = self
-            // Dark by decision, not by system setting — the palette is dark-only.
+            // Dark by decision, not by system setting. The palette is dark-only.
             w.appearance = NSAppearance(named: .darkAqua)
             w.backgroundColor = NSColor(PT.C.window)
             // The root view draws its own titlebar strip; the system one only

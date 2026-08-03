@@ -1,9 +1,10 @@
 import Foundation
 
 /// The handoff: take a finished transcript and put it in front of a coding
-/// agent, primed with a prompt that treats it as messy speech-to-text rather
-/// than gospel. The transcript is passed verbatim — no summarizing step,
-/// because a lossy summary is exactly where requirements get quietly dropped.
+/// agent. The prompt tells the agent to treat the transcript as messy
+/// speech-to-text rather than gospel. Patchthrough passes the transcript
+/// verbatim and adds no summary step. A lossy summary is where requirements
+/// get dropped quietly.
 enum Handoff {
 
     // MARK: - Agents
@@ -82,8 +83,8 @@ enum Handoff {
             case vscodeChat                      // code chat -n -a <file> "<prompt>"
             case cursorDeeplink                  // open repo, prompt via cursor:// deeplink + clipboard
             case appClipboard(appName: String)   // open -a <App>, everything on the clipboard
-            case fileOpen(appName: String)       // open -a <App> <transcript.md> — the file attaches
-            case folderOpen(appName: String)     // open -a <App> <session dir> — Cowork-style workspace
+            case fileOpen(appName: String)       // open -a <App> <transcript.md>, which attaches the file
+            case folderOpen(appName: String)     // open -a <App> <session dir> for a Cowork-style workspace
         }
 
         /// Whether launching this target needs a project folder.
@@ -96,22 +97,23 @@ enum Handoff {
     }
 
     static let knownGuiTargets: [GuiTarget] = [
-        GuiTarget(id: "copilot", label: "Copilot — VS Code", kind: .vscodeChat),
+        GuiTarget(id: "copilot", label: "Copilot (VS Code)", kind: .vscodeChat),
         GuiTarget(id: "cursor", label: "Cursor", kind: .cursorDeeplink),
-        // Claude.app declares public.data as an accepted document type, so an
-        // `open -a Claude <file>` genuinely attaches the transcript — no
-        // clipboard blob. It also takes public.folder with an Editor role,
-        // which is the Cowork folder-mount path: hand it the whole session
-        // directory and the agent can read the audio, meta and transcript.
-        GuiTarget(id: "claude", label: "Claude app — attach transcript", kind: .fileOpen(appName: "Claude")),
-        GuiTarget(id: "claude-cowork", label: "Claude Cowork — session folder", kind: .folderOpen(appName: "Claude")),
-        GuiTarget(id: "codex", label: "Codex — ChatGPT app", kind: .appClipboard(appName: "ChatGPT")),
+        // Claude.app declares public.data as an accepted document type, so
+        // `open -a Claude <file>` attaches the transcript itself. There is no
+        // clipboard blob. Claude.app also takes public.folder with an Editor
+        // role, which is the Cowork folder-mount path. Give Claude.app the
+        // whole session directory, and the agent can read the audio, the meta
+        // file and the transcript.
+        GuiTarget(id: "claude", label: "Claude app (attach transcript)", kind: .fileOpen(appName: "Claude")),
+        GuiTarget(id: "claude-cowork", label: "Claude Cowork (session folder)", kind: .folderOpen(appName: "Claude")),
+        GuiTarget(id: "codex", label: "Codex (ChatGPT app)", kind: .appClipboard(appName: "ChatGPT")),
         GuiTarget(id: "kimi", label: "Kimi app", kind: .appClipboard(appName: "Kimi")),
     ]
 
     /// SF Symbols per destination. Keyed by id so terminal agents and GUI
-    /// targets stay visually consistent — `claude` looks like `claude`
-    /// whichever door it goes through.
+    /// targets stay visually consistent. `claude` looks like `claude`
+    /// whichever door the handoff uses.
     static func symbol(for id: String) -> String {
         switch id {
         case "claude":        return "sparkle"
@@ -193,8 +195,8 @@ enum Handoff {
             }
 
         case .appClipboard(let appName):
-            // No prompt API — the handoff document is self-contained: it
-            // carries both the task instructions and verbatim transcript.
+            // No prompt API. The handoff document is self-contained. It
+            // carries both the task instructions and the verbatim transcript.
             pbcopy(handoffDocument(for: session))
             let open = Process()
             open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
@@ -206,7 +208,7 @@ enum Handoff {
         case .fileOpen(let appName):
             // The app accepts arbitrary files (public.data), so hand it the
             // transcript as an actual attachment. Instructions go on the
-            // clipboard — attach + ⌘V + send.
+            // clipboard, so the user attaches, presses ⌘V, and sends.
             let doc = exportHandoffFile(for: session)
             pbcopy(attachPrompt(for: session))
             let open = Process()
@@ -216,8 +218,9 @@ enum Handoff {
 
         case .folderOpen(let appName):
             // The app takes folders with an Editor role (Cowork-style
-            // workspace): hand it the whole session directory — audio,
-            // meta.json, transcript — and the agent works with the originals.
+            // workspace). Give the app the whole session directory, which holds
+            // the audio, meta.json and the transcript. The agent then works
+            // with the original files.
             _ = exportHandoffFile(for: session)   // ensure handoff.md is in the folder too
             pbcopy(folderPrompt(for: session))
             let open = Process()
@@ -227,7 +230,7 @@ enum Handoff {
         }
     }
 
-    /// Prompt for the file-attach path — the transcript arrives as an
+    /// Prompt for the file-attach path. The transcript arrives as an
     /// attachment, not inline.
     static func attachPrompt(for session: Session) -> String {
         """
@@ -237,7 +240,7 @@ enum Handoff {
 
         1. Concrete work items it implies, ordered by what should happen first.
         2. Anything stated as a decision or constraint I shouldn't relitigate.
-        3. Anything ambiguous, contradictory, or that reads like a transcription error — ask rather than guess.
+        3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
 
         It's speech-to-text, so it's messy: unreliable punctuation, garbled \
         technical terms, 'me' and 'them' instead of names. Read for intent, \
@@ -245,7 +248,7 @@ enum Handoff {
         """
     }
 
-    /// Prompt for the folder-workspace path — the whole session directory is
+    /// Prompt for the folder-workspace path. The whole session directory is
     /// the workspace.
     static func folderPrompt(for session: Session) -> String {
         """
@@ -257,7 +260,7 @@ enum Handoff {
 
         1. Concrete work items it implies, ordered by what should happen first.
         2. Anything stated as a decision or constraint I shouldn't relitigate.
-        3. Anything ambiguous, contradictory, or that reads like a transcription error — ask rather than guess.
+        3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
 
         It's speech-to-text, so read for intent, not literal wording.
         """
@@ -305,7 +308,7 @@ enum Handoff {
         osa.waitUntilExit()
         if osa.terminationStatus != 0 {
             FileHandle.standardError.write(Data(
-                "auto_paste failed — grant Accessibility to patchthrough in System Settings → Privacy & Security\n".utf8
+                "auto_paste failed. Grant Accessibility to patchthrough in System Settings → Privacy & Security\n".utf8
             ))
         }
     }
@@ -320,7 +323,7 @@ enum Handoff {
 
         1. Concrete work items it implies, ordered by what should happen first.
         2. Anything stated as a decision or constraint I shouldn't relitigate.
-        3. Anything ambiguous, contradictory, or that reads like a transcription error — ask rather than guess.
+        3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
         4. Anything discussed that the current project may already do or contradict.
 
         It's speech-to-text, so it's messy: unreliable punctuation, garbled \
@@ -361,13 +364,13 @@ enum Handoff {
         var description: String {
             switch self {
             case .noSessions(let root):
-                return "no transcribed sessions in \(root.path) yet — record one from the menu bar first"
+                return "no transcribed sessions in \(root.path) yet. Record one from the menu bar first"
             case .sessionNotFound(let name, let root):
                 return "no session '\(name)' in \(root.path)"
             case .notTranscribed(let name):
                 return "session '\(name)' has no transcript yet; if it's still processing, check its transcribe.log"
             case .emptyTranscript(let name):
-                return "session '\(name)' has a transcript file but no segments — both tracks likely failed; check its transcribe.log"
+                return "session '\(name)' has a transcript file but no segments. Both tracks probably failed. Check its transcribe.log"
             case .unknownAgent(let name, let available):
                 return "'\(name)' isn't installed or isn't an agent patchthrough knows. Found here: \(available.isEmpty ? "none" : available.joined(separator: ", "))"
             }
@@ -448,9 +451,9 @@ enum Handoff {
             .drop(while: { !$0.hasPrefix("**[") })
             .joined(separator: "\n")
 
-        let truncationNote = session.cleanStop ? "" : " (recording ended uncleanly — may be truncated)"
+        let truncationNote = session.cleanStop ? "" : " (recording ended uncleanly, so the transcript may be truncated)"
         return """
-        # Meeting handoff — \(session.name)
+        # Meeting handoff: \(session.name)
 
         ## Instructions
 
@@ -488,7 +491,7 @@ enum Handoff {
             let exclude = URL(fileURLWithPath: gitDir).appendingPathComponent("info/exclude")
             let existing = (try? String(contentsOf: exclude, encoding: .utf8)) ?? ""
             if !existing.components(separatedBy: "\n").contains(".meeting/") {
-                let addition = "\n# patchthrough meeting transcripts — local only, never commit\n.meeting/\n"
+                let addition = "\n# patchthrough meeting transcripts: local only, never commit\n.meeting/\n"
                 try? (existing + addition).write(to: exclude, atomically: true, encoding: .utf8)
             }
         }
@@ -499,13 +502,13 @@ enum Handoff {
 
     static func prompt(for session: Session) -> String {
         """
-        Read .meeting/\(session.name).md — the transcript of a meeting I just had, in this repo.
+        Read .meeting/\(session.name).md. That file is the transcript of a meeting I just had in this repo.
 
         Work out what it asks of this codebase, then tell me before changing anything:
 
         1. Concrete work items it implies, ordered by what should happen first, with the files or areas involved.
         2. Anything stated as a decision or constraint I shouldn't relitigate.
-        3. Anything ambiguous, contradictory, or that reads like a transcription error — ask rather than guess.
+        3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
         4. Anything discussed that the code already does, or already contradicts.
 
         It's speech-to-text, so it's messy: unreliable punctuation, garbled technical \
@@ -538,7 +541,7 @@ enum Handoff {
             pipe.fileHandleForWriting.write(Data(prompt.utf8))
             try? pipe.fileHandleForWriting.close()
             pb.waitUntilExit()
-            FileHandle.standardError.write(Data("prompt on your clipboard — paste it (⌘V) once \(agent.name) is up\n\n".utf8))
+            FileHandle.standardError.write(Data("prompt on your clipboard. Paste it (⌘V) once \(agent.name) is up\n\n".utf8))
             argv = [path]
         }
 
@@ -566,12 +569,12 @@ enum Handoff {
         case .runSubcommand:
             launcher = "\(shq(path)) run \"$(cat \(shq(stagedPrompt.path)))\"; rm -f \(shq(stagedPrompt.path))"
         case .clipboardThenPlain:
-            launcher = "cat \(shq(stagedPrompt.path)) | pbcopy; rm -f \(shq(stagedPrompt.path)); echo 'prompt on clipboard — ⌘V once \(agent.name) is up'; \(shq(path))"
+            launcher = "cat \(shq(stagedPrompt.path)) | pbcopy; rm -f \(shq(stagedPrompt.path)); echo 'prompt on clipboard. Press ⌘V once \(agent.name) is up'; \(shq(path))"
         }
         let command = "cd \(shq(cwd.path)) && PATH=\(shq(searchDirs.joined(separator: ":"))):\"$PATH\" \(launcher)"
 
-        // Whichever terminal the user picked — their shell profile, and so the
-        // agent's environment, comes from that app rather than from Terminal.app.
+        // The user picks the terminal. That app supplies the shell profile, and
+        // therefore the agent's environment, instead of Terminal.app.
         TerminalApp.current().run(command)
     }
 

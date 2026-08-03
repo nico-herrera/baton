@@ -2,15 +2,15 @@
 
 Record the meeting. We'll patch you through to your agent.
 
-Patchthrough is a macOS menu-bar app that records your meetings (your mic and the
-other side of the call as two separate tracks), transcribes them **entirely
-on-device**, and then hands the transcript to whatever coding agent you use —
-Claude Code, Copilot, Codex, Kimi, opencode, cursor-agent — as a primed
-session in the repo you were meeting about.
+Patchthrough is a macOS menu-bar app that records your meetings. It transcribes them
+**entirely on-device**, then gives the transcript to the coding agent you use. It
+records your microphone and the other side of the call as two separate tracks. The
+agent starts as a primed session in the repository you discussed. Patchthrough
+supports Claude Code, Copilot, Codex, Kimi, opencode, and cursor-agent.
 
-Nothing leaves your machine. There's no account, no server, no upload. The
-handoff is the product: the gap between *"we agreed on it in the meeting"* and
-*"an agent is implementing it with the transcript in context"* is one click.
+Nothing leaves your machine. There is no account, no server, and no upload. The
+handoff is the product. One click takes you from *"we agreed on it in the meeting"* to
+*"an agent is implementing it with the transcript in context"*.
 
 ```
 ┌─ meeting ─────────┐   ┌─ on-device ─────────┐   ┌─ your agent ──────────────┐
@@ -22,45 +22,47 @@ handoff is the product: the gap between *"we agreed on it in the meeting"* and
 
 ## How it works
 
-1. **Click the Patchthrough in the menu bar → Start recording.** Your mic and
-   everything the Mac plays are captured as two separate CAF tracks. Two
-   tracks on purpose: speech models do better on clean single-source audio,
-   and mic-vs-system gives you two-party diarization — `me` vs `them` — with
-   no speaker-identification model at all.
-2. **Click Stop.** Transcription starts automatically (Parakeet TDT 0.6B via
-   [FluidAudio](https://github.com/FluidInference/FluidAudio), Core ML,
-   roughly 20 seconds per hour of audio on Apple Silicon).
-3. **Menu bar → "Hand off to → claude"** (or any agent it detects on your
-   machine). Pick the project folder; a terminal opens there with the agent
-   running and the transcript staged. Or from a terminal, in the repo:
+1. **Click Patchthrough in the menu bar, then click Start recording.** Patchthrough
+   captures your microphone and everything the Mac plays as two separate CAF tracks.
+   Two tracks are deliberate. Speech models work better on clean single-source audio.
+   The two tracks also give you two-party diarization, `me` against `them`, with no
+   speaker-identification model.
+2. **Click Stop.** Transcription starts automatically. It uses Parakeet TDT 0.6B
+   through [FluidAudio](https://github.com/FluidInference/FluidAudio) and Core ML.
+   Expect roughly 20 seconds of processing for each hour of audio on Apple Silicon.
+3. **In the menu bar, click Patch through to, then click claude.** The menu lists every
+   agent that Patchthrough finds on your machine. Select the project folder. A terminal
+   opens in that folder with the agent running and the transcript staged. You can also
+   run this command inside the repository:
 
    ```sh
    patchthrough hand claude
    ```
 
-The agent gets the verbatim transcript — deliberately not a summary, because a
-lossy summary is exactly where requirements get quietly dropped — plus a prompt
-that tells it to extract work items, decisions, and ambiguities, ask before
-guessing at garbled terms, and not touch any code until you've agreed the plan.
+The agent gets the verbatim transcript, not a summary. This is deliberate. A lossy
+summary is where requirements get dropped quietly. Patchthrough adds a prompt with the
+transcript. The prompt tells the agent to extract work items, decisions, and
+ambiguities, to ask you before it guesses at a garbled term, and to change no code
+until you agree the plan.
 
-The transcript lands in `.meeting/` inside your repo, which Patchthrough adds to the
-repo's **local** git excludes — meeting content can't end up in a commit by
-accident, and your `.gitignore` isn't touched.
+The transcript lands in `.meeting/` inside your repository. Patchthrough adds
+`.meeting/` to the repository's **local** git excludes. Meeting content cannot reach a
+commit by accident, and Patchthrough does not touch your `.gitignore`.
 
 ## Install the macOS app
 
 [Download Patchthrough-arm64.dmg](https://github.com/nico-herrera/patchthrough/releases/latest/download/Patchthrough-arm64.dmg),
-open it, and drag Patchthrough into Applications. Launch at login is available
-in Patchthrough Settings.
+open it, and drag Patchthrough into Applications. Patchthrough Settings has an option
+to launch the app at login.
 
-Releases are signed with Developer ID, notarized by Apple, and published with a
-SHA-256 checksum, so they open on a normal double-click. This open-source
-project is distributed directly through GitHub rather than the Mac App Store;
-Developer ID is Apple's supported path for exactly that.
+Apple notarizes each release, and each release is signed with Developer ID and
+published with a SHA-256 checksum. Releases therefore open on a normal double-click.
+This open-source project ships directly through GitHub instead of the Mac App Store.
+Developer ID is Apple's supported path for that kind of distribution.
 
-If you build an unsigned copy yourself, note that macOS 15 removed the old
-right-click → **Open** bypass. Open **System Settings → Privacy & Security**,
-find the blocked-app notice, and choose **Open Anyway**.
+macOS 15 removed the old right-click → **Open** bypass for unsigned apps. If you build
+an unsigned copy yourself, open **System Settings → Privacy & Security**, find the
+blocked-app notice, and click **Open Anyway**.
 
 To build from source instead:
 
@@ -70,18 +72,18 @@ cd patchthrough
 ./packaging/make-app.sh                  # builds and installs to ~/Applications
 ```
 
-No `sudo` is needed for `~/Applications`. The app bundle gives macOS a stable
-name, icon, signature, and permission identity.
+`~/Applications` needs no `sudo`. The app bundle gives macOS a stable name, icon,
+signature, and permission identity.
 
-**Requires:** macOS 15+ (system-audio capture uses Core Audio process taps),
-Apple Silicon (transcription runs on the Neural Engine). Models (~600 MB)
-download once on first transcription — record a short test while online before
-your first real meeting.
+**Requires:** macOS 15 or later, because system-audio capture uses Core Audio process
+taps. Apple Silicon is also required, because transcription runs on the Neural Engine.
+The models are about 600 MB and download once on the first transcription. Record a
+short test session while you are online, before your first real meeting.
 
 ## Command-line client
 
-The npm package is a separate, cross-platform transcript client. It does not
-download or install the macOS app and has no install scripts:
+The npm package is a separate transcript client that runs on any platform. It does not
+download or install the macOS app, and it has no install scripts:
 
 ```sh
 npm i -g patchthrough
@@ -94,14 +96,14 @@ patchthrough transcripts            # list sessions: length, status, first line
 patchthrough hand codex --file meeting.md
 ```
 
-The CLI reads sessions written by the app, but it also accepts any transcript
-file or stdin and can be used without the app. See [`cli/`](cli/) for its full
-documentation. Upgrading from npm package 1.x leaves the already-installed app
-and recordings in place; it only replaces the old wrapper command with the new
-CLI.
+The CLI reads the sessions that the app writes. It also accepts any transcript file or
+input on stdin, so you can use the CLI without the app. See [`cli/`](cli/) for the full
+CLI documentation. If you upgrade from npm package 1.x, your installed app and your
+recordings stay in place. The upgrade only replaces the old wrapper command with the
+new CLI.
 
-Sessions land in `~/Recordings/<yyyy.MM.dd-HHmm>/`: the two audio tracks,
-`meta.json`, `transcript.json` (timed, speaker-tagged segments), and
+Sessions land in `~/Recordings/<yyyy.MM.dd-HHmm>/`. Each session holds the two audio
+tracks, `meta.json`, `transcript.json` with timed and speaker-tagged segments, and
 `transcript.md`.
 
 Optional config at `~/.config/patchthrough/config.json`:
@@ -115,100 +117,102 @@ Optional config at `~/.config/patchthrough/config.json`:
 }
 ```
 
-`on_stop` runs any command with the finished session directory as its argument
-— summarization, filing, indexing, whatever comes after the transcript.
+`on_stop` runs any command and passes the finished session directory as the argument.
+Use it for summarization, filing, indexing, or any other step that follows the
+transcript.
 
 ## Agents
 
-Two kinds of destination, both auto-detected:
+Patchthrough detects two kinds of destination automatically.
 
-**Terminal sessions** — Patchthrough looks for agent CLIs in the usual install
-locations: `claude`, `copilot`, `codex`, `kimi`, `opencode`, `cursor-agent`.
-Most launch as `<agent> "<prompt>"`; opencode uses `opencode run`; kimi takes
-no initial prompt, so Patchthrough stages it on your clipboard.
+**Terminal sessions.** Patchthrough looks for agent CLIs in the usual install
+locations: `claude`, `copilot`, `codex`, `kimi`, `opencode`, and `cursor-agent`. Most
+agents launch as `<agent> "<prompt>"`. opencode uses `opencode run`. kimi takes no
+initial prompt, so Patchthrough stages the prompt on your clipboard.
 
-**GUIs** (`patchthrough hand <target> --gui`, or straight from the menu bar) — each
-app gets the best door it actually exposes:
+**GUI apps.** Run `patchthrough hand <target> --gui`, or start the handoff from the
+menu bar. Each app gets the best entry point that the app exposes:
 
 | target | how the handoff lands |
 |---|---|
-| `copilot` | VS Code opens via `code chat` — agent mode, transcript attached as context |
-| `cursor` | Cursor opens the repo, prompt arrives via its `cursor://` deeplink (clipboard fallback) |
-| `claude` | Claude app opens **with the transcript file attached** (it accepts any file as a document); instructions on the clipboard |
-| `claude-cowork` | Claude opens the **whole session folder** as a workspace — audio, timing, transcript, all of it |
-| `codex` | ChatGPT app opens; prompt + full transcript on the clipboard, one paste |
-| `kimi` | Kimi app opens; same clipboard payload |
+| `copilot` | VS Code opens through `code chat` in agent mode, with the transcript attached as context |
+| `cursor` | Cursor opens the repository, and the prompt arrives through the `cursor://` deeplink (clipboard fallback) |
+| `claude` | The Claude app opens **with the transcript file attached**, because it accepts any file as a document. Instructions go to the clipboard |
+| `claude-cowork` | Claude opens the **whole session folder** as a workspace, including audio, timing, and transcript |
+| `codex` | The ChatGPT app opens. The prompt and the full transcript go to the clipboard as one paste |
+| `kimi` | The Kimi app opens with the same clipboard payload |
 
-Where an app exposes no prompt API, the clipboard payload is deliberately
-self-contained — instructions first, verbatim transcript below. Add
-`"auto_paste": true` to the config and Patchthrough finishes the job itself,
-synthesizing ⌘N + ⌘V after the app opens (one-time Accessibility grant; you
-still press send).
+Some apps expose no prompt API. For those apps, the clipboard payload is
+self-contained: instructions first, then the verbatim transcript. Add
+`"auto_paste": true` to the config, and Patchthrough completes the paste for you. It
+synthesizes ⌘N and ⌘V after the app opens. macOS asks for Accessibility permission
+once, and you still press send.
 
-And the universal door: the Patchthrough window (menu bar → Open Patchthrough) shows every
-session with a **drag chip** — drag the transcript file into any chat input
-anywhere, including apps Patchthrough has no button for. The generated
-`handoff.md` is self-contained: it carries both the instructions for the agent
-and the verbatim transcript, so the command is not lost when a file is dragged
-or attached.
+The Patchthrough window is the universal entry point. Open it from the menu bar. Every
+session in the window has a **drag chip**. Drag the transcript file into any chat
+input, including the input of an app that Patchthrough has no button for. The generated
+`handoff.md` is self-contained. It carries both the instructions for the agent and the
+verbatim transcript, so a dragged or attached file keeps the instructions.
 
-Adding an agent or GUI target is a one-line entry in
+To add an agent or a GUI target, add one entry to
 `Sources/patchthrough/Handoff.swift`.
 
 ## Trust
 
-The transcript of your meetings is about as sensitive as data gets, so the
-supply-chain posture is deliberate:
+The transcript of your meetings is about as sensitive as data gets. The supply-chain
+posture is therefore deliberate:
 
-- **Everything on-device.** Audio, transcripts, and the handoff never touch a
-  network. The only downloads are the transcription models, fetched once from
-  HuggingFace by FluidAudio.
-- **Exact dependency pins.** Two dependencies (swift-argument-parser,
-  FluidAudio), pinned with `.exact()` — no version range can silently pull
-  unreviewed code into a binary with microphone access.
-- **Reviewed baselines.** `packaging/verify-deps.sh` fails the build if the
-  resolved dependencies drift from the committed baseline, if the compiled
-  checkout doesn't match the lockfile, or if a dependency checkout has local
-  modifications. `packaging/verify-models.sh` does the same for the downloaded
-  model files, which are executed by Core ML and otherwise covered by nothing.
-- **No npm install scripts.** The npm package is plain JavaScript. It never
-  downloads or executes a native binary during installation.
-- **Documented handoff contract.** The app and CLI communicate through the
-  versioned session files documented in [`schemas/session-v1.md`](schemas/session-v1.md).
-- **Small native app bundle.** The executable, Info.plist, icon, and required
-  assets live in a normal signed macOS bundle so Dock identity and TCC
-  permissions stay attached to Patchthrough.
+- **Everything on-device.** Audio, transcripts, and the handoff never touch a network.
+  The only downloads are the transcription models. FluidAudio fetches them once from
+  HuggingFace.
+- **Exact dependency pins.** Patchthrough has two dependencies,
+  swift-argument-parser and FluidAudio, and pins both with `.exact()`. No version range
+  can pull unreviewed code into a binary that has microphone access.
+- **Reviewed baselines.** `packaging/verify-deps.sh` fails the build in three cases:
+  the resolved dependencies drift from the committed baseline, the compiled checkout
+  does not match the lockfile, or a dependency checkout has local modifications.
+  `packaging/verify-models.sh` does the same for the downloaded model files. Core ML
+  executes those files, and nothing else covers them.
+- **No npm install scripts.** The npm package is plain JavaScript. It never downloads
+  or executes a native binary during installation.
+- **Documented handoff contract.** The app and the CLI communicate through the
+  versioned session files that
+  [`schemas/session-v1.md`](schemas/session-v1.md) documents.
+- **Small native app bundle.** The executable, Info.plist, icon, and required assets
+  live in a normal signed macOS bundle. Dock identity and TCC permissions therefore
+  stay attached to Patchthrough.
 
 ## Gotchas
 
-- A global tap records **everything** the Mac plays — notification dings,
-  music, all of it. Don't play anything you don't want transcribed.
-- Silent recordings usually mean System Settings → Privacy & Security →
+- A global tap records **everything** the Mac plays. This includes notification sounds
+  and music. Do not play anything that you do not want in the transcript.
+- A silent recording usually means one thing: System Settings → Privacy & Security →
   Screen & System Audio Recording is off for patchthrough.
-- Parakeet is English-only.
-- Expect ASR errors on proper nouns and identifiers; the handoff prompt warns
+- Parakeet transcribes English only.
+- Expect transcription errors on proper nouns and identifiers. The handoff prompt warns
   the agent about exactly this.
 
 ## Releases
 
-The app and CLI share this repository and the session-file contract, but they
+The app and the CLI share this repository and the session-file contract, but they
 release independently:
 
-- `./packaging/make-dist.sh <version>` builds the signed disk image, and
-  `./packaging/notarize.sh` notarizes and staples it before it is attached to a
-  GitHub release.
-- `cd cli && npm publish` publishes the JavaScript CLI. CLI releases use tags
-  such as `cli-v2.0.0`; app releases retain `v1.0.2`-style tags.
+- `./packaging/make-dist.sh <version>` builds the signed disk image.
+  `./packaging/notarize.sh` then notarizes and staples the disk image before you attach
+  it to a GitHub release.
+- `cd cli && npm publish` publishes the JavaScript CLI. CLI releases use tags such as
+  `cli-v2.0.0`. App releases keep `v1.0.2`-style tags.
 
-Changing `schemas/session-v1.md` requires compatibility coverage in the CLI
-tests and a fallback for sessions written by older app versions.
+If you change `schemas/session-v1.md`, add compatibility coverage to the CLI tests. Add
+a fallback for the sessions that older app versions wrote.
 
 ## Credits
 
-Patchthrough began as a detached rebuild of [quill](https://github.com/digimata/quill)
-by digimata — the recording and transcription core descends from it (MIT, see
-LICENSE). Transcription is [Parakeet TDT](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2)
-via [FluidAudio](https://github.com/FluidInference/FluidAudio)'s Core ML port.
+Patchthrough began as a detached rebuild of
+[quill](https://github.com/digimata/quill) by digimata. The recording and transcription
+core descends from quill (MIT, see LICENSE). Transcription uses
+[Parakeet TDT](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) through
+[FluidAudio](https://github.com/FluidInference/FluidAudio)'s Core ML port.
 
 ## License
 

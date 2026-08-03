@@ -64,7 +64,7 @@ function taskInstructions() {
 
 1. Concrete work items it implies, ordered by what should happen first.
 2. Anything stated as a decision or constraint I shouldn't relitigate.
-3. Anything ambiguous, contradictory, or that reads like a transcription error — ask rather than guess.
+3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
 4. Anything discussed that the current project may already do or contradict.
 
 It's speech-to-text, so it's messy: unreliable punctuation, garbled technical terms, and possibly incorrect speaker labels. Read for intent, not literal wording. Don't edit anything until we've agreed the list.`;
@@ -75,9 +75,9 @@ function buildHandoffDocument(session) {
   const firstSegment = lines.findIndex((line) => /^\*\*\[/.test(line));
   const body = (firstSegment >= 0 ? lines.slice(firstSegment) : lines).join('\n').trim();
   const truncation = session.cleanStop === false
-    ? ' (recording ended uncleanly — it may be truncated)'
+    ? ' (recording ended uncleanly, so the transcript may be truncated)'
     : '';
-  return `# Meeting handoff — ${session.name}
+  return `# Meeting handoff: ${session.name}
 
 ## Instructions
 
@@ -190,7 +190,7 @@ function listSessions(root) {
       const metaPath = path.join(dir, 'meta.json');
       if (!fs.existsSync(transcriptPath) && !fs.existsSync(metaPath)) return null;
       if (!fs.existsSync(transcriptPath)) {
-        return { name: entry.name, status: 'pending', duration: '—', opensWith: 'not transcribed yet' };
+        return { name: entry.name, status: 'pending', duration: '-', opensWith: 'not transcribed yet' };
       }
       try {
         const session = readSession(dir);
@@ -202,7 +202,7 @@ function listSessions(root) {
           opensWith: spokenText(first).slice(0, 60) || '(empty)',
         };
       } catch (error) {
-        return { name: entry.name, status: 'error', duration: '—', opensWith: error.message };
+        return { name: entry.name, status: 'error', duration: '-', opensWith: error.message };
       }
     })
     .filter(Boolean)
@@ -221,7 +221,7 @@ function updateGitExclude(repo) {
   fs.mkdirSync(path.dirname(exclude), { recursive: true });
   fs.writeFileSync(
     exclude,
-    `${existing}${existing.endsWith('\n') || existing.length === 0 ? '' : '\n'}\n# patchthrough meeting transcripts — local only, never commit\n.meeting/\n`,
+    `${existing}${existing.endsWith('\n') || existing.length === 0 ? '' : '\n'}\n# patchthrough meeting transcripts: local only, never commit\n.meeting/\n`,
   );
 }
 
@@ -241,13 +241,13 @@ function stageSession(session, repo) {
 
 function promptFor(session, stagedPath) {
   const relative = path.join('.meeting', path.basename(stagedPath));
-  return `Read ${relative} — the transcript of a meeting relevant to this repository.
+  return `Read ${relative}. That file is the transcript of a meeting relevant to this repository.
 
 Work out what it asks of this codebase, then tell me before changing anything:
 
 1. Concrete work items it implies, ordered by what should happen first, with the files or areas involved.
 2. Anything stated as a decision or constraint I shouldn't relitigate.
-3. Anything ambiguous, contradictory, or that reads like a transcription error — ask rather than guess.
+3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
 4. Anything discussed that the code already does, or already contradicts.
 
 It's speech-to-text, so read for intent rather than literal wording. Don't edit anything until we've agreed the list.`;
@@ -299,7 +299,7 @@ function launchAgent(name, prompt, cwd, env = process.env) {
   if (definition.style === 'run') args = ['run', prompt];
   else if (definition.style === 'clipboard') {
     if (copyToClipboard(prompt)) {
-      process.stderr.write(`prompt copied — paste it once ${name} starts\n`);
+      process.stderr.write(`prompt copied. Paste it once ${name} starts\n`);
     } else {
       process.stderr.write(`this agent takes no initial prompt; copy this after it starts:\n\n${prompt}\n\n`);
     }

@@ -5,7 +5,7 @@
 # Why a bundle at all, when the philosophy is single-binary: LaunchServices
 # only reads identity (Dock label, Finder icon, TCC dialog name) from a
 # bundle. A bare binary promoted to .regular shows a generic icon and the
-# label "exec" in the Dock — a runtime NSApp.applicationIconImage fixes the
+# label "exec" in the Dock. A runtime NSApp.applicationIconImage fixes the
 # picture but nothing can fix the name. The npm CLI is a separate product and
 # no longer points into this bundle.
 #
@@ -73,7 +73,7 @@ EOF
 cp "$BIN" "$APP/Contents/MacOS/patchthrough"
 
 # App accent colour (Signal). macOS takes sidebar selection, toggles and
-# prominent buttons from the bundle's compiled AccentColor — SwiftUI .tint
+# prominent buttons from the bundle's compiled AccentColor. SwiftUI .tint
 # alone cannot recolour sidebar selection.
 #
 # actool ships with full Xcode, not the Command Line Tools. A CLT-only machine
@@ -84,7 +84,7 @@ if xcrun --find actool >/dev/null 2>&1; then
     --platform macosx --minimum-deployment-target 15.0 \
     --output-partial-info-plist /dev/null >/dev/null
 else
-  say "actool needs full Xcode — building without the compiled AccentColor"
+  say "actool needs full Xcode. Building without the compiled AccentColor"
 fi
 
 # --- sign ------------------------------------------------------------------
@@ -103,7 +103,7 @@ if security find-identity -v -p codesigning 2>/dev/null | grep -q "DAB6FR7R2R"; 
     "$APP"
   codesign --verify --strict "$APP" || fail "bundle signature failed to verify"
 else
-  say "no signing identity — bundle left unsigned"
+  say "no signing identity. Bundle left unsigned"
 fi
 
 say "→ $APP"
@@ -126,7 +126,7 @@ fi
 # Launch Services indexes every bundle it can see, so a build copy left in
 # dist/ shows up as a second Patchthrough in Launchpad and Spotlight: same
 # icon, same bundle ID, listed under its filename instead of its display name.
-# Unregistering it doesn't stick — the directory watcher re-adds it — so the
+# An unregister does not stick, because the directory watcher re-adds it. So the
 # build copy has to go. make-dist.sh sets KEEP_DIST because it packages this
 # exact bundle, and deletes it itself once the tarball exists.
 if [ "${PATCHTHROUGH_KEEP_DIST:-0}" != "1" ]; then

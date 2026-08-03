@@ -8,13 +8,13 @@
 # Why this exists: the Parakeet CoreML models (~600 MB) are NOT in the repo and
 # NOT pinned by Package.resolved. FluidAudio downloads them at runtime from
 # HuggingFace on first transcription, and CoreML then executes them. That's the
-# least-protected link in the chain — an unpinned fetch of executable content,
+# least-protected link in the chain: an unpinned fetch of executable content,
 # with no signature and no hash published by upstream that we can check against.
 #
 # There is no way to verify the FIRST download is authentic; nothing to compare
 # it to. What this does give you is change detection: baseline the hashes once,
-# and any later substitution — a re-download pulling different weights, or
-# something writing into the model cache — shows up as a diff.
+# and any later substitution shows up as a diff. A re-download can pull
+# different weights, or something can write into the model cache.
 #
 # If a mismatch appears and you didn't deliberately update: delete the model
 # directory, re-download while on a network you trust, and compare again.
@@ -47,19 +47,19 @@ if [ "${1:-}" = "--update" ]; then
   SIZE=$(du -sh "$MODELS" | cut -f1)
   echo "  $COUNT files, $SIZE"
   echo
-  warn "Baseline only if you trust the current copy — ideally right after a"
+  warn "Baseline only if you trust the current copy. Ideally do it right after a"
   warn "fresh download on a network you control."
   printf 'Type REVIEWED to confirm: '
   read -r answer
-  [ "$answer" = "REVIEWED" ] || fail "aborted — baseline unchanged"
+  [ "$answer" = "REVIEWED" ] || fail "aborted. Baseline unchanged"
   {
     echo "# Reviewed model baseline for patchthrough."
     echo "# Regenerate with: ./packaging/verify-models.sh --update"
-    echo "# Baselined $(date -u '+%Y-%m-%d %H:%M:%SZ') — $COUNT files, $SIZE"
+    echo "# Baselined $(date -u '+%Y-%m-%d %H:%M:%SZ'): $COUNT files, $SIZE"
     echo "# Source: FluidAudio downloads these from HuggingFace at runtime."
     hash_models
   } > "$LOCK"
-  say "wrote $LOCK — commit it."
+  say "wrote $LOCK. Commit it."
   exit 0
 fi
 
@@ -93,5 +93,5 @@ deliberately re-download or change models, treat this as suspicious:
   2. re-download by recording a short test session on a trusted network
   3. ./packaging/verify-models.sh   (compare again)
 
-If it still differs, upstream FluidAudio changed the published models — verify
+If it still differs, upstream FluidAudio changed the published models. Verify
 that independently before re-baselining."

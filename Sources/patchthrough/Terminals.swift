@@ -18,7 +18,7 @@ struct TerminalApp: Identifiable, Equatable {
         case commandFile           // generic
     }
 
-    /// Bundle identifier — also the value stored in the config file.
+    /// Bundle identifier. The config file stores this same value.
     let id: String
     /// Shown in Settings.
     let name: String
@@ -60,8 +60,8 @@ struct TerminalApp: Identifiable, Equatable {
     }
 
     /// The configured terminal, falling back to Terminal.app when the config
-    /// names something absent — a handoff that silently does nothing because
-    /// the chosen app was uninstalled is worse than opening the stock one.
+    /// names an app that is absent. A handoff that silently does nothing after
+    /// someone uninstalls the chosen app is worse than opening the stock app.
     static func current() -> TerminalApp {
         let fallback = known[0]
         guard let id = Config.terminal(),

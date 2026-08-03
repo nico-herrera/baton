@@ -11,8 +11,8 @@ import Foundation
 ///
 /// Resolution order for the recordings root: --out flag > config file >
 /// ~/Recordings. `on_stop` is a shell command spawned with the session
-/// directory as its argument — after the transcript is written, or right
-/// after recording when transcription is disabled.
+/// directory as its argument. It runs after Patchthrough writes the transcript,
+/// or right after recording when transcription is disabled.
 enum Config {
     static let path = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".config/patchthrough/config.json")
@@ -50,8 +50,8 @@ enum Config {
 
     /// Apple voice processing (acoustic echo cancellation) on the mic, so
     /// speaker playback doesn't bleed into the mic track and get transcribed
-    /// as "me". Default off — the live voice unit ducks all other playback,
-    /// and on headphones there's no echo to cancel anyway. Set true when
+    /// as "me". Default off, because the live voice unit ducks all other
+    /// playback, and on headphones there is no echo to cancel. Set true when
     /// recording meetings through the speakers.
     static func micVoiceProcessing() -> Bool {
         load()?["mic_voice_processing"] as? Bool ?? false
@@ -119,8 +119,8 @@ enum Config {
     /// The most specific path that actually exists, for revealing in Finder.
     /// The config file is only written once a setting has been saved, and
     /// `activateFileViewerSelecting` silently does nothing for a path that
-    /// isn't there — so fall back to the containing directory, creating it so
-    /// there is always something to show.
+    /// isn't there. Fall back to the containing directory, and create that
+    /// directory so there is always something to show.
     static func revealTarget() -> URL {
         if FileManager.default.fileExists(atPath: path.path) { return path }
         let dir = path.deletingLastPathComponent()
@@ -129,7 +129,7 @@ enum Config {
     }
 
     /// Parse the config file. A malformed config is reported on stderr rather
-    /// than silently ignored — recordings landing in an unexpected place is
+    /// than silently ignored. A recording that lands in an unexpected place is
     /// worse than a warning.
     private static func load() -> [String: Any]? {
         guard FileManager.default.fileExists(atPath: path.path) else { return nil }
@@ -138,7 +138,7 @@ enum Config {
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
             FileHandle.standardError.write(Data(
-                "warning: \(path.path) is not valid JSON — ignoring config\n".utf8
+                "warning: \(path.path) is not valid JSON. Ignoring config\n".utf8
             ))
             return nil
         }

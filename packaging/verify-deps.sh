@@ -14,8 +14,9 @@
 #     (i.e. what actually got compiled != what the lockfile claims)
 #
 # What it does NOT catch: a dependency that was already malicious at the pinned
-# revision. Pinning guarantees you keep getting the same code — not that the
-# code is good. Reviewing FluidAudio's 0.15.5 tree is a separate job.
+# revision. Pinning guarantees you keep getting the same code. It does not
+# guarantee that the code is good. A review of FluidAudio's 0.15.5 tree is a
+# separate job.
 
 set -euo pipefail
 
@@ -48,7 +49,7 @@ if [ "${1:-}" = "--update" ]; then
   echo
   printf 'These revisions will be treated as reviewed and trusted. Type REVIEWED to confirm: '
   read -r answer
-  [ "$answer" = "REVIEWED" ] || fail "aborted — baseline unchanged"
+  [ "$answer" = "REVIEWED" ] || fail "aborted. Baseline unchanged"
   {
     echo "# Reviewed dependency baseline for patchthrough."
     echo "# Regenerate with: ./packaging/verify-deps.sh --update"
@@ -56,7 +57,7 @@ if [ "${1:-}" = "--update" ]; then
     echo "# Baselined $(date -u '+%Y-%m-%d %H:%M:%SZ') by $(whoami)"
     current_pins
   } > "$LOCK"
-  say "wrote $LOCK — commit it."
+  say "wrote $LOCK. Commit it."
   exit 0
 fi
 
@@ -92,7 +93,7 @@ echo
 say "checked-out source vs Package.resolved…"
 
 if [ ! -d .build/checkouts ]; then
-  echo "  (no checkouts yet — run swift build first)"
+  echo "  (no checkouts yet. Run swift build first)"
 else
   while read -r id rev ver loc; do
     # SwiftPM's checkout dir uses the repo name, which may differ in case from
@@ -117,7 +118,7 @@ else
     fi
 
     # A dirty dependency checkout means someone edited third-party source in
-    # place — nothing legitimate does that.
+    # place. Nothing legitimate does that.
     if [ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ]; then
       bad "$id: checkout has LOCAL MODIFICATIONS"
       git -C "$dir" status --short | head -5 | sed 's/^/      /'
@@ -133,7 +134,7 @@ say "transitive dependency surface…"
 COUNT="$(current_pins | wc -l | tr -d ' ')"
 echo "  $COUNT direct+transitive package(s) pinned"
 if [ "$COUNT" -gt 5 ]; then
-  bad "more dependencies than expected — did an upstream change add one?"
+  bad "more dependencies than expected. Did an upstream change add one?"
   FAILED=1
 else
   ok "unchanged in size"
@@ -143,7 +144,7 @@ echo
 if [ "$FAILED" -eq 0 ]; then
   say "✓ dependencies match the reviewed baseline"
 else
-  fail "✗ dependency verification FAILED — do not build or install until you have
+  fail "✗ dependency verification FAILED. Do not build or install until you have
 reviewed the changes above. If they are legitimate and you have read the new
 code, re-baseline with: ./packaging/verify-deps.sh --update"
 fi

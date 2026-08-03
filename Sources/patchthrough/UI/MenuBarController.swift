@@ -2,8 +2,8 @@ import AppKit
 
 /// Status bar item. Art per the logo handoff (regular at rest, heavy while
 /// patching, Signal dot while recording); menu per APP_REDESIGN_HANDOFF.md
-/// round 10e — leads with the verb, promotes the top-ranked destination to a
-/// one-click item, and the state header carries the session count.
+/// round 10e. The menu leads with the verb and promotes the top-ranked
+/// destination to a one-click item. The state header carries the session count.
 @MainActor
 final class MenuBarController {
 
@@ -130,7 +130,7 @@ final class MenuBarController {
 
     private func renderState(elapsed: String?) {
         if isRecording {
-            // ● Recording  1:04 — Signal, monospaced digits.
+            // ● Recording  1:04 in Signal, with monospaced digits.
             let s = NSMutableAttributedString(
                 string: "● Recording",
                 attributes: [.foregroundColor: PT.NS.signal]
@@ -197,7 +197,7 @@ final class MenuBarController {
             guard !entries.isEmpty else { return }
             sub.addItem(NSMenuItem.sectionHeader(title: header))
             for e in entries {
-                // Never show a count of 0 — omit the suffix instead.
+                // Never show a count of 0. Omit the suffix instead.
                 let title = e.count > 0 ? "\(e.label)   \(e.count)×" : e.label
                 let item = NSMenuItem(title: title, action: #selector(handoffClicked(_:)), keyEquivalent: "")
                 item.target = self
@@ -213,7 +213,7 @@ final class MenuBarController {
         handoffItem.submenu = sub
     }
 
-    // MARK: - The mark (unchanged by the redesign — logo handoff is authoritative)
+    // MARK: - The mark (the redesign did not change it; the logo handoff rules)
 
     enum MarkWeight { case regular, heavy }
 

@@ -36,8 +36,8 @@ struct Patchthrough: ParsableCommand {
     )
 }
 
-/// `patchthrough hand [agent]` — stage the newest (or a chosen) transcript in the
-/// current repo and start an agent session primed with it.
+/// `patchthrough hand [agent]` stages the newest transcript, or a chosen
+/// transcript, in the current repo. It then starts a primed agent session.
 struct Hand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "hand",
@@ -77,7 +77,7 @@ struct Hand: ParsableCommand {
         guard let agentName = agent else {
             print("terminal agents installed here:")
             if installed.isEmpty {
-                print("  (none found — looked in \(Handoff.searchDirs.joined(separator: ", ")))")
+                print("  (none found. Looked in \(Handoff.searchDirs.joined(separator: ", ")))")
             }
             for (a, path) in installed { print("  \(a.name)  →  \(path)") }
             print("\nGUI targets (use --gui):")
@@ -89,7 +89,7 @@ struct Hand: ParsableCommand {
         let sess = try Handoff.resolveSession(named: session, root: root)
         if sess.words < 40 {
             FileHandle.standardError.write(Data(
-                "⚠ '\(sess.name)' is only ~\(sess.words) words — thin context, likely a test recording or a quiet mic\n".utf8
+                "⚠ '\(sess.name)' is only ~\(sess.words) words. The context is thin. This is probably a test recording or a quiet mic\n".utf8
             ))
         }
 
@@ -129,7 +129,7 @@ struct Hand: ParsableCommand {
     }
 }
 
-/// `patchthrough transcripts` — what's on disk, newest first.
+/// `patchthrough transcripts` lists what is on disk, newest first.
 struct Transcripts: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "transcripts",
@@ -163,9 +163,9 @@ struct Transcripts: ParsableCommand {
                     .prefix(50) ?? "(empty)"
                 print(row(name, sess.duration, String(first)))
             } else if fm.fileExists(atPath: d.appendingPathComponent("meta.json").path) {
-                print(row(name, "—", "⏳ not transcribed yet"))
+                print(row(name, "-", "⏳ not transcribed yet"))
             } else {
-                print(row(name, "—", "⚠ no meta.json — interrupted?"))
+                print(row(name, "-", "⚠ no meta.json. Interrupted?"))
             }
         }
     }
@@ -218,15 +218,15 @@ struct Run: ParsableCommand {
 
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
-        // Runtime Dock icon — a bare binary has no bundle for the system to
-        // read one from, and the window promotes us to .regular.
+        // Runtime Dock icon. A bare binary has no bundle for the system to read
+        // an icon from, and the window promotes us to .regular.
         AppIcon.apply()
 
         let controller = AppController(root: root)
         app.delegate = controller
         if opensWindowAtLaunch {
-            // Defer until the run loop is pumping — ordering a window front
-            // before app.run() silently no-ops for accessory apps.
+            // Defer until the run loop is pumping. An accessory app silently
+            // ignores a window order-front call made before app.run().
             DispatchQueue.main.async { controller.openWindow() }
         }
         if ProcessInfo.processInfo.environment["PATCHTHROUGH_DEBUG_MENU"] != nil {
@@ -240,7 +240,7 @@ struct Run: ParsableCommand {
         //
         // SIGTERM matters as much as SIGINT here: `launchctl bootout`, logout,
         // and reboot all send SIGTERM, and without a handler a recording in
-        // progress never gets stop() — no finalized files, no final meta.json.
+        // progress never gets stop(): no finalized files and no final meta.json.
         let signalSources = [SIGINT, SIGTERM, SIGHUP].map { sig -> DispatchSourceSignal in
             signal(sig, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
@@ -258,9 +258,9 @@ struct Run: ParsableCommand {
 
         // The sources MUST outlive the run loop. A plain local (or a trailing
         // `_ = sources`) is not enough: its last use is above, so ARC is free to
-        // release the sources before app.run() — and because the disposition is
-        // already SIG_IGN, the signals then become silently ignored rather than
-        // falling back to default-terminate. Verified: SIGTERM was a no-op
+        // release the sources before app.run(). The disposition is already
+        // SIG_IGN, so the signals then become silently ignored instead of
+        // default-terminate. Verified: SIGTERM was a no-op
         // until this was wrapped.
         withExtendedLifetime(controller) {
             withExtendedLifetime(signalSources) {
@@ -467,7 +467,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     /// Menu-bar handoff. `choice` is "cli:<agent>" (Terminal session) or
     /// "gui:<target>" (VS Code chat, Cursor, or a chat app). Repo-based
-    /// targets get a folder picker first; chat apps don't need one — the
+    /// targets get a folder picker first. Chat apps need no folder, because the
     /// transcript rides along on the clipboard.
     private func handOff(to choice: String) {
         guard let session = try? Handoff.resolveSession(named: nil, root: root) else { return }
@@ -482,20 +482,20 @@ final class AppController: NSObject, NSApplicationDelegate {
                 switch target.kind {
                 case .appClipboard(let appName):
                     notifyUser(
-                        title: "Patchthrough — handed to \(appName)",
+                        title: "Patchthrough: handed to \(appName)",
                         body: Config.autoPaste()
                             ? "Pasting into a new chat…"
                             : "Prompt + transcript are on your clipboard. Paste (⌘V) into a new chat."
                     )
                 case .fileOpen(let appName):
                     notifyUser(
-                        title: "Patchthrough — handed to \(appName)",
-                        body: "Transcript attached. Instructions are on your clipboard — paste (⌘V) and send."
+                        title: "Patchthrough: handed to \(appName)",
+                        body: "Transcript attached. Instructions are on your clipboard. Paste (⌘V) and send."
                     )
                 case .folderOpen(let appName):
                     notifyUser(
-                        title: "Patchthrough — session folder → \(appName)",
-                        body: "Instructions are on your clipboard — paste (⌘V) once the workspace opens."
+                        title: "Patchthrough: session folder → \(appName)",
+                        body: "Instructions are on your clipboard. Paste (⌘V) once the workspace opens."
                     )
                 default: break
                 }
@@ -517,7 +517,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         do {
             try Handoff.stage(session: session, inRepo: repo)
         } catch {
-            notifyUser(title: "Patchthrough — handoff failed", body: "\(error)")
+            notifyUser(title: "Patchthrough: handoff failed", body: "\(error)")
             return
         }
         Handoff.launchInTerminal(
@@ -533,7 +533,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func pickRepo(session: String, destination: String) -> URL? {
         let panel = NSOpenPanel()
         panel.title = "Hand \(session) to \(destination)"
-        panel.message = "Choose the project this meeting was about — the session starts there."
+        panel.message = "Choose the project this meeting was about. The session starts in that folder."
         panel.prompt = "Start session"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -568,7 +568,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             FileHandle.standardError.write(Data("● recording → \(newSession.dir.path)\n".utf8))
         } catch {
             FileHandle.standardError.write(Data("recording start failed: \(error)\n".utf8))
-            notifyUser(title: "Patchthrough — recording failed", body: "\(error)")
+            notifyUser(title: "Patchthrough: recording failed", body: "\(error)")
             return
         }
 
@@ -602,7 +602,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         switch status {
         case .idle:
             menuBar.updateTranscription(nil)
-            // A drain just finished — new transcript(s) may exist.
+            // A drain just finished, so new transcripts may exist.
             refreshHandoffMenu()
             store.refresh()
         case .transcribing(let name, let queued):
