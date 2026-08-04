@@ -71,6 +71,12 @@ try {
     Assert-True (Test-Path -LiteralPath (Join-Path $expanded 'APACHE-2.0.txt') -PathType Leaf) 'portable ZIP has no Apache license'
     Assert-True (Test-Path -LiteralPath (Join-Path $expanded 'DOTNET-LICENSE.txt') -PathType Leaf) 'portable ZIP has no .NET license'
     Assert-True (Test-Path -LiteralPath (Join-Path $expanded 'DOTNET-THIRD-PARTY-NOTICES.txt') -PathType Leaf) 'portable ZIP has no .NET notices'
+    # Whisper.net.Runtime.Vulkan once added its Linux natives to a win-x64
+    # publish, which put 61 MB of unloadable ELF objects in the download. The
+    # Windows natives ride inside the single-file executable, so a loose .so or
+    # .dylib here means that regressed.
+    $foreign = @(Get-ChildItem -LiteralPath $expanded -Recurse -File -Include '*.so', '*.dylib')
+    Assert-True ($foreign.Count -eq 0) "portable ZIP carries non-Windows native libraries: $($foreign.Name -join ', ')"
     if (-not [string]::IsNullOrWhiteSpace($ExpectedVersion)) {
         $actualVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($portableExe).ProductVersion
         Assert-True ($actualVersion -eq $ExpectedVersion) "portable version is '$actualVersion', expected '$ExpectedVersion'"
