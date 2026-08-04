@@ -12,6 +12,19 @@ param(
 
     [string] $TimestampUrl = 'http://timestamp.digicert.com',
 
+    [string] $SignPathApiToken,
+
+    [string] $SignPathOrganizationId,
+
+    [string] $SignPathProjectSlug = 'patchthrough',
+
+    [string] $SignPathSigningPolicySlug,
+
+    # A self-signed test certificate cannot chain to a trusted root, so strict
+    # chain verification always fails for test-signed builds. Release builds
+    # must never set this.
+    [switch] $AllowUntrustedSignature,
+
     [switch] $SkipInstaller
 )
 
@@ -61,20 +74,85 @@ function Find-SignTool {
     $candidates = @(Get-ChildItem (Join-Path $kitsRoot 'Windows Kits\10\bin\*\x64\signtool.exe') -ErrorAction SilentlyContinue |
         Sort-Object FullName -Descending)
     if ($candidates.Count -eq 0) {
-        throw 'signtool.exe was not found. Install the Windows SDK or omit -CertificateThumbprint.'
+        throw 'signtool.exe was not found. Install the Windows SDK, or omit signing, or pass -AllowUntrustedSignature to verify without it.'
     }
     return $candidates[0].FullName
+}
+
+function Assert-SigningParameters {
+    if ([string]::IsNullOrWhiteSpace($SignPathApiToken)) {
+        return
+    }
+    if (-not [string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
+        throw 'Pass -SignPathApiToken or -CertificateThumbprint, not both'
+    }
+    foreach ($name in @('SignPathOrganizationId', 'SignPathProjectSlug', 'SignPathSigningPolicySlug')) {
+        if ([string]::IsNullOrWhiteSpace((Get-Variable -Name $name -ValueOnly))) {
+            throw "-SignPathApiToken also requires -$name"
+        }
+    }
+}
+
+function Submit-SignPathArtifact {
+    param([Parameter(Mandatory = $true)][string] $Path)
+
+    if ($null -eq (Get-Module -ListAvailable -Name 'SignPath')) {
+        throw 'The SignPath module is missing. Run: Install-Module SignPath -Force -Scope CurrentUser'
+    }
+    Import-Module 'SignPath'
+
+    # SignPath signs a copy on the server instead of the file in place, so the
+    # returned artifact must replace the original before the build continues.
+    $signed = "$Path.signpath"
+    Submit-SigningRequest `
+        -InputArtifactPath $Path `
+        -ApiToken $SignPathApiToken `
+        -OrganizationId $SignPathOrganizationId `
+        -ProjectSlug $SignPathProjectSlug `
+        -SigningPolicySlug $SignPathSigningPolicySlug `
+        -OutputArtifactPath $signed `
+        -WaitForCompletion
+    if (-not (Test-Path -LiteralPath $signed -PathType Leaf)) {
+        throw "SignPath returned no signed artifact for $Path"
+    }
+    Move-Item -LiteralPath $signed -Destination $Path -Force
+}
+
+function Assert-Signature {
+    param([Parameter(Mandatory = $true)][string] $Path)
+
+    if (-not $AllowUntrustedSignature) {
+        $signTool = Find-SignTool
+        Invoke-Checked $signTool 'verify' '/pa' '/v' $Path
+        return
+    }
+
+    # Get-AuthenticodeSignature reports UnknownError when the chain ends in an
+    # untrusted root, which is the expected result for a self-signed test
+    # certificate. A missing or damaged signature reports a different status,
+    # so a failed signing request still stops the build here.
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    if ($null -eq $signature.SignerCertificate) {
+        throw "$Path is not signed"
+    }
+    if (@('Valid', 'UnknownError') -notcontains $signature.Status.ToString()) {
+        throw "$Path has an unusable signature: $($signature.Status)"
+    }
+    Write-Host "Signed by $($signature.SignerCertificate.Subject) (chain not verified)"
 }
 
 function Invoke-AuthenticodeSign {
     param([Parameter(Mandatory = $true)][string] $Path)
 
-    if ([string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
+    if (-not [string]::IsNullOrWhiteSpace($SignPathApiToken)) {
+        Submit-SignPathArtifact $Path
+    } elseif (-not [string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
+        $signTool = Find-SignTool
+        Invoke-Checked $signTool 'sign' '/sha1' $CertificateThumbprint '/fd' 'sha256' '/tr' $TimestampUrl '/td' 'sha256' '/v' $Path
+    } else {
         return
     }
-    $signTool = Find-SignTool
-    Invoke-Checked $signTool 'sign' '/sha1' $CertificateThumbprint '/fd' 'sha256' '/tr' $TimestampUrl '/td' 'sha256' '/v' $Path
-    Invoke-Checked $signTool 'verify' '/pa' '/v' $Path
+    Assert-Signature $Path
 }
 
 function Find-InnoCompiler {
@@ -159,6 +237,8 @@ function Copy-DotnetNotices {
     Copy-Item -LiteralPath (Join-Path $runtimeDirectory 'LICENSE.TXT') -Destination (Join-Path $Destination 'DOTNET-LICENSE.txt')
     Copy-Item -LiteralPath (Join-Path $runtimeDirectory 'THIRD-PARTY-NOTICES.TXT') -Destination (Join-Path $Destination 'DOTNET-THIRD-PARTY-NOTICES.txt')
 }
+
+Assert-SigningParameters
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 foreach ($artifact in @($zipPath, "$zipPath.sha256", $setupPath, "$setupPath.sha256")) {
