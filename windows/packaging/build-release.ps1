@@ -173,8 +173,8 @@ New-Item -ItemType Directory -Force -Path $publishDirectory | Out-Null
 
 try {
     Write-Host "Publishing Patchthrough $Version for win-x64"
-    Invoke-Checked 'dotnet' 'restore' $project '--nologo'
-    Invoke-Checked 'dotnet' 'publish' $project '--configuration' 'Release' '--self-contained' 'true' '--output' $publishDirectory '--no-restore' '--nologo' `
+    Invoke-Checked 'dotnet' 'restore' $project '--runtime' 'win-x64' '--nologo'
+    Invoke-Checked 'dotnet' 'publish' $project '--configuration' 'Release' '--runtime' 'win-x64' '--self-contained' 'true' '--output' $publishDirectory '--no-restore' '--nologo' `
         "-p:Version=$Version" '-p:PublishSingleFile=true' '-p:IncludeNativeLibrariesForSelfExtract=true' `
         '-p:EnableCompressionInSingleFile=true' '-p:PublishTrimmed=false' '-p:DebugSymbols=false' '-p:DebugType=None' `
         '-p:IncludeSourceRevisionInInformationalVersion=false'
