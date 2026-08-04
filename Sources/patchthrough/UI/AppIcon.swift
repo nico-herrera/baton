@@ -7,6 +7,7 @@ import AppKit
 /// Geometry is the design system's Signal treatment (packaging/design):
 /// squircle at 22.4% corner radius filled #D2371B, the mark at 64% of the
 /// tile in Paper (#FFF9F4), heavy weight (2.1), and flat. No bevel, no gradient.
+@MainActor
 enum AppIcon {
 
     static func apply() {

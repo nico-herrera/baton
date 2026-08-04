@@ -27,7 +27,7 @@ actor TranscriptionCoordinator {
 
     private var queue: [URL] = []
     private var draining = false
-    private var engine: TranscriptionEngine?
+    private var engines: [TranscriptionEngine] = []
     private var lastFailure: String?
     private var statusHandler: (@Sendable (Status) -> Void)?
 
@@ -118,8 +118,8 @@ actor TranscriptionCoordinator {
                 )
             }
         }
-        await engine?.release()
-        engine = nil
+        for engine in engines { await engine.release() }
+        engines = []
         publish(lastFailure.map { .failed(session: $0) } ?? .idle)
         draining = false
         // An enqueue that landed between the loop exiting and the release
@@ -129,9 +129,16 @@ actor TranscriptionCoordinator {
 
     private func transcribe(_ dir: URL) async throws {
         let meta = try SessionMeta.read(from: dir)
-        let engine = try await preparedEngine()
+        let mode = Config.transcriptionQualityMode()
+        let profile = QualityProfile.load()
+        let engines = try await preparedEngines(profile: profile, mode: mode)
+        let vocabulary = ProjectVocabulary.collect(projectRoot: Config.transcriptionProjectDir())
+        let context = TranscriptionContext(qualityMode: mode, vocabulary: vocabulary)
 
         var merged: [Transcript.Segment] = []
+        var rawTracks: [RawTrack] = []
+        var selectedEngines: [String] = []
+        var selectedModels: [String] = []
         var attempted = 0
         var succeeded = 0
         for track in meta.tracks {
@@ -141,24 +148,70 @@ actor TranscriptionCoordinator {
                 continue
             }
             attempted += 1
-            log(dir, "transcribing \(track.file) (\(engine.name))")
-            // One bad track (empty, truncated) shouldn't cost us the other's
-            // transcript. Log the failure and keep going.
-            let segments: [TranscriptSegment]
+            let normalized: URL
             do {
-                segments = try await engine.transcribe(audio)
+                normalized = try AudioNormalizer.normalize(
+                    audio,
+                    into: dir.appendingPathComponent("normalized", isDirectory: true)
+                )
             } catch {
-                log(dir, "skipping \(track.file): \(error)")
+                log(dir, "could not normalize \(track.file): \(error)")
                 continue
             }
+            var hypotheses: [EngineTranscript] = []
+            var failures: [String] = []
+            // Engines run sequentially: Max Accuracy trades latency for lower
+            // WER without doubling peak model pressure.
+            for engine in engines {
+                log(dir, "transcribing \(track.file) (\(engine.name))")
+                do {
+                    hypotheses.append(try await engine.transcribe(normalized, context: context))
+                } catch {
+                    let failure = "\(engine.name): \(error)"
+                    failures.append(failure)
+                    log(dir, "optional engine failed for \(track.file): \(failure)")
+                }
+            }
+            guard !hypotheses.isEmpty else { continue }
             succeeded += 1
+            let rawSelection: EngineTranscript
+            if profile.canRunConsensus, hypotheses.count >= 2 {
+                rawSelection = TranscriptConsensus.combine(
+                    hypotheses[0], hypotheses[1], calibration: profile.calibration)
+                hypotheses.append(rawSelection)
+            } else {
+                rawSelection = hypotheses[0]
+            }
+            let result = TranscriptCalibration.apply(rawSelection, calibration: profile.calibration)
+            selectedEngines.append(result.engine)
+            selectedModels.append(result.model)
             let offset = TimeInterval(track.offsetMs) / 1000
-            merged += segments.map {
+            rawTracks.append(RawTrack(
+                sourceTrack: track.key,
+                speaker: track.speaker,
+                offsetMs: track.offsetMs,
+                audioFile: track.file,
+                hypotheses: hypotheses,
+                selectedHypothesis: hypotheses.count - 1,
+                optionalStageFailures: failures
+            ))
+            merged += result.segments.map {
                 Transcript.Segment(
                     speaker: track.speaker,
-                    start_ms: Int(($0.start + offset) * 1000),
-                    end_ms: Int(($0.end + offset) * 1000),
-                    text: $0.text
+                    source_track: track.key,
+                    start_ms: $0.startMs + Int(offset * 1000),
+                    end_ms: $0.endMs + Int(offset * 1000),
+                    text: $0.text,
+                    confidence: $0.confidence,
+                    applied_vocabulary: result.context.appliedTerms,
+                    words: $0.words.map { word in
+                        TimedWord(
+                            text: word.text,
+                            startMs: word.startMs + track.offsetMs,
+                            endMs: word.endMs + track.offsetMs,
+                            confidence: word.confidence
+                        )
+                    }
                 )
             }
         }
@@ -171,6 +224,14 @@ actor TranscriptionCoordinator {
         if attempted > 0 && succeeded == 0 {
             throw TranscriptionError.allTracksFailed(attempted: attempted)
         }
+
+        try RawTranscript(
+            schemaVersion: 1,
+            pipelineVersion: 2,
+            qualityMode: mode,
+            createdAt: ISO8601DateFormatter().string(from: Date()),
+            tracks: rawTracks
+        ).write(to: dir)
 
         // Stable ordering: Swift's sort isn't stable, so mic/system segments
         // sharing a start_ms would otherwise swap places between runs. Break
@@ -190,8 +251,10 @@ actor TranscriptionCoordinator {
         }
 
         let transcript = Transcript(
-            engine: engine.name,
-            model: engine.model,
+            pipeline_version: 2,
+            engine: orderedUnique(selectedEngines).joined(separator: "+"),
+            model: orderedUnique(selectedModels).joined(separator: "+"),
+            quality_mode: mode,
             created_at: ISO8601DateFormatter().string(from: Date()),
             segments: merged
         )
@@ -211,18 +274,33 @@ actor TranscriptionCoordinator {
         log(dir, "done: \(merged.count) segments")
     }
 
-    private func preparedEngine() async throws -> TranscriptionEngine {
-        if let engine { return engine }
+    private func preparedEngines(profile: QualityProfile, mode: QualityMode) async throws -> [TranscriptionEngine] {
+        if !engines.isEmpty { return engines }
         let configured = Config.transcriptionEngine()
-        if configured != "parakeet" {
-            FileHandle.standardError.write(Data(
-                "warning: unknown transcription engine \"\(configured)\". Using parakeet\n".utf8
-            ))
+        let names = profile.engines(configured: configured, mode: mode)
+        var prepared: [TranscriptionEngine] = []
+        for name in names {
+            let engine: TranscriptionEngine
+            switch name {
+            case "parakeet": engine = ParakeetEngine()
+            case "whisper", "whisperkit": engine = WhisperKitEngine()
+            case "apple-speech": engine = AppleSpeechEngine()
+            default:
+                FileHandle.standardError.write(Data(
+                    "warning: unknown transcription engine \"\(name)\". Using parakeet\n".utf8
+                ))
+                engine = ParakeetEngine()
+            }
+            try await engine.prepare()
+            prepared.append(engine)
         }
-        let engine = ParakeetEngine()
-        try await engine.prepare()
-        self.engine = engine
-        return engine
+        engines = prepared
+        return prepared
+    }
+
+    private func orderedUnique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.filter { seen.insert($0).inserted }
     }
 
     /// Fires the configured on_stop shell command with the session directory
@@ -261,6 +339,7 @@ actor TranscriptionCoordinator {
 /// represent, and how far each track started after the earliest one.
 private struct SessionMeta {
     struct Track {
+        let key: String
         let file: String
         let speaker: String
         let offsetMs: Int
@@ -291,10 +370,10 @@ private struct SessionMeta {
         let offsets = json["start_offset_ms"] as? [String: Int] ?? [:]
         var tracks: [Track] = []
         if let mic = files["mic"] {
-            tracks.append(Track(file: mic, speaker: "me", offsetMs: offsets["mic"] ?? 0))
+            tracks.append(Track(key: "mic", file: mic, speaker: "me", offsetMs: offsets["mic"] ?? 0))
         }
         if let system = files["system"] {
-            tracks.append(Track(file: system, speaker: "them", offsetMs: offsets["system"] ?? 0))
+            tracks.append(Track(key: "system", file: system, speaker: "them", offsetMs: offsets["system"] ?? 0))
         }
         return SessionMeta(tracks: tracks)
     }
@@ -318,94 +397,76 @@ private struct SessionMeta {
 /// minimum-length floor keeps a genuine simultaneous "yeah" from both
 /// speakers alive.
 private enum EchoDedup {
-    /// How far apart (ms) the two copies of one utterance can start. Echo is
-    /// near-simultaneous; 5s absorbs the engines segmenting the tracks
-    /// differently.
-    private static let windowMs = 5000
-    /// Segments whose normalized text is shorter never drop: "yeah" from
-    /// both speakers is agreement, not echo.
-    private static let minLength = 12
-    /// Minimum Levenshtein similarity for two texts to count as one
-    /// utterance.
-    private static let threshold = 0.7
+    private static let matchThreshold = 0.8
+    private static let timingWindowMs = 1_500
 
     static func dropMicEcho(from segments: [Transcript.Segment]) -> [Transcript.Segment] {
-        let system = segments.filter { $0.speaker == "them" }
-            .map { (start: $0.start_ms, text: normalize($0.text)) }
+        let system = segments.filter { $0.source_track == "system" }
         guard !system.isEmpty else { return segments }
 
-        return segments.filter { seg in
-            guard seg.speaker == "me" else { return true }
-            let text = normalize(seg.text)
-            guard text.count >= minLength else { return true }
-            return !system.contains { candidate in
-                abs(candidate.start - seg.start_ms) <= windowMs
-                    && isEcho(text, candidate.text)
+        return segments.filter { mic in
+            guard mic.source_track == "mic", mic.words.count >= 3 else { return true }
+            let nearby = system.filter {
+                $0.end_ms + timingWindowMs >= mic.start_ms
+                    && $0.start_ms - timingWindowMs <= mic.end_ms
             }
-        }
-    }
+            let candidates = nearby.flatMap(\.words)
+            guard !candidates.isEmpty else { return true }
 
-    /// Lowercase, punctuation stripped, whitespace collapsed. ASR renders the
-    /// same audio with different casing and punctuation per track; the words
-    /// are what repeat.
-    private static func normalize(_ text: String) -> String {
-        text.lowercased()
-            .map { $0.isLetter || $0.isNumber ? String($0) : " " }
-            .joined()
-            .split(separator: " ")
-            .joined(separator: " ")
-    }
-
-    private static func isEcho(_ a: String, _ b: String) -> Bool {
-        // Containment: the mic often catches a fragment of an utterance the
-        // system track has whole (or the reverse). A shared run this long is
-        // not coincidence.
-        if a.count >= minLength, b.count >= minLength, a.contains(b) || b.contains(a) {
-            return true
-        }
-        let longest = max(a.count, b.count)
-        guard longest > 0 else { return false }
-        // Cheap pre-check: a length gap alone can rule the pair out, and
-        // Levenshtein is quadratic.
-        guard Double(longest - min(a.count, b.count)) / Double(longest) <= 1 - threshold else {
-            return false
-        }
-        return 1 - Double(levenshtein(a, b)) / Double(longest) >= threshold
-    }
-
-    private static func levenshtein(_ a: String, _ b: String) -> Int {
-        let s = Array(a.unicodeScalars), t = Array(b.unicodeScalars)
-        if s.isEmpty { return t.count }
-        if t.isEmpty { return s.count }
-        var previous = Array(0...t.count)
-        var current = [Int](repeating: 0, count: t.count + 1)
-        for i in 1...s.count {
-            current[0] = i
-            for j in 1...t.count {
-                current[j] = Swift.min(
-                    previous[j] + 1,
-                    current[j - 1] + 1,
-                    previous[j - 1] + (s[i - 1] == t[j - 1] ? 0 : 1)
-                )
+            var used = Set<Int>()
+            var matches = 0
+            for word in mic.words {
+                guard let index = candidates.indices.first(where: { index in
+                    !used.contains(index)
+                        && abs(candidates[index].startMs - word.startMs) <= timingWindowMs
+                        && normalize(candidates[index].text) == normalize(word.text)
+                }) else { continue }
+                used.insert(index)
+                matches += 1
             }
-            swap(&previous, &current)
+            let ratio = Double(matches) / Double(mic.words.count)
+            let micConfidence = mean(mic.words.compactMap(\.confidence)) ?? mic.confidence ?? 0
+            let systemConfidence = mean(used.compactMap { candidates[$0].confidence })
+                ?? mean(nearby.compactMap(\.confidence)) ?? 0
+            // The track with more acoustic evidence wins. Equal/unknown scores
+            // favor the direct system tap, never an unverified context term.
+            return !(ratio >= matchThreshold && systemConfidence >= micConfidence)
         }
-        return previous[t.count]
+    }
+
+    private static func normalize(_ word: String) -> String {
+        word.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    private static func mean(_ values: [Double]) -> Double? {
+        values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
     }
 }
 
 /// Canonical transcript. Property names are the JSON schema. This struct
 /// exists to be serialized.
-private struct Transcript: Codable {
-    struct Segment: Codable {
+private struct Transcript: Encodable {
+    struct Segment: Encodable {
         let speaker: String
+        let source_track: String
         let start_ms: Int
         let end_ms: Int
         let text: String
+        let confidence: Double?
+        let applied_vocabulary: [String]
+        /// Retained in memory for word-level echo comparison, but the full
+        /// timing data lives in transcript.raw.json rather than duplicating it.
+        let words: [TimedWord]
+
+        private enum CodingKeys: String, CodingKey {
+            case speaker, source_track, start_ms, end_ms, text, confidence, applied_vocabulary
+        }
     }
 
+    let pipeline_version: Int
     let engine: String
     let model: String
+    let quality_mode: QualityMode
     let created_at: String
     let segments: [Segment]
 
@@ -436,5 +497,33 @@ private struct Transcript: Codable {
         return h > 0
             ? String(format: "%d:%02d:%02d", h, m, s)
             : String(format: "%d:%02d", m, s)
+    }
+}
+
+private struct RawTrack: Codable {
+    let sourceTrack: String
+    let speaker: String
+    let offsetMs: Int
+    let audioFile: String
+    let hypotheses: [EngineTranscript]
+    let selectedHypothesis: Int
+    let optionalStageFailures: [String]
+}
+
+private struct RawTranscript: Codable {
+    let schemaVersion: Int
+    let pipelineVersion: Int
+    let qualityMode: QualityMode
+    let createdAt: String
+    let tracks: [RawTrack]
+
+    func write(to directory: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        try encoder.encode(self).write(
+            to: directory.appendingPathComponent("transcript.raw.json"),
+            options: .atomic
+        )
     }
 }

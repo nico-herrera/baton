@@ -41,12 +41,14 @@ Hand options:
 Agents:
   ${Object.keys(KNOWN_AGENTS).join(', ')}
 
-Web sites (macOS only, with --web):
+Web sites (macOS and Windows, with --web):
   ${Object.keys(webTargets()).join(', ')}
 
 A web handoff puts handoff.md on the clipboard as a file and opens the site.
-One paste (⌘V) attaches the transcript.
+One paste (⌘V on macOS, Ctrl+V on Windows) attaches the transcript.
 `;
+
+const PASTE_KEY = process.platform === 'win32' ? 'Ctrl+V' : '⌘V';
 
 function parse(argv) {
   const options = {};
@@ -108,18 +110,34 @@ function printSessions(root) {
   }
 }
 
+// The clipboard tools a Windows web handoff needs. A missing tool means the
+// handoff falls back to a drag, so report the tools rather than fail later.
+function windowsClipboardLine() {
+  const system32 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
+  const tools = [
+    path.join(system32, 'clip.exe'),
+    path.join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+  ];
+  const missing = tools.filter((tool) => !fs.existsSync(tool)).map((tool) => path.basename(tool));
+  return missing.length === 0
+    ? '✓ clipboard   clip.exe and powershell.exe found'
+    : `○ clipboard   missing ${missing.join(', ')}`;
+}
+
 function doctor(root) {
-  const appPaths = process.platform === 'darwin'
-    ? [
+  console.log(`${fs.existsSync(root) ? '✓' : '○'} recordings  ${root}`);
+  if (process.platform === 'darwin') {
+    const app = [
       path.join(require('os').homedir(), 'Applications', 'patchthrough.app'),
       '/Applications/patchthrough.app',
-    ]
-    : [];
-  const app = appPaths.find((candidate) => fs.existsSync(candidate));
-  console.log(`${fs.existsSync(root) ? '✓' : '○'} recordings  ${root}`);
-  console.log(`${app ? '✓' : '○'} macOS app   ${app || 'not installed (optional for file/stdin handoffs)'}`);
+    ].find((candidate) => fs.existsSync(candidate));
+    console.log(`${app ? '✓' : '○'} macOS app   ${app || 'not installed (optional for file/stdin handoffs)'}`);
+  } else {
+    console.log('○ macOS app   macOS only. Use --file or stdin on this machine');
+  }
   const agents = installedAgents();
   console.log(`${agents.length ? '✓' : '○'} agents      ${agents.map((agent) => agent.name).join(', ') || 'none found'}`);
+  if (process.platform === 'win32') console.log(windowsClipboardLine());
 }
 
 function main() {
@@ -177,7 +195,7 @@ function main() {
     }
     if (site.uploadsToCloud) {
       process.stderr.write(
-        `⚠ ${site.label} copies an attached file to your work OneDrive, so this transcript leaves this Mac\n`
+        `⚠ ${site.label} copies an attached file to your work OneDrive, so this transcript leaves this machine\n`
       );
     }
     if (options.noLaunch) {
@@ -188,10 +206,14 @@ function main() {
     }
     const result = handToWeb(site, session, { targets });
     process.stderr.write(`→ ${site.label}\n`);
-    if (!result.attached) {
+    if (result.attached) {
+      if (!result.pasted) {
+        process.stderr.write(`the transcript is on your clipboard as a file. Press ${PASTE_KEY} in the page to attach it\n`);
+      }
+    } else if (result.copiedText) {
+      process.stderr.write(`could not copy the file reference. The full handoff is on your clipboard as text. Press ${PASTE_KEY} in the page to paste it\n`);
+    } else {
       process.stderr.write(`could not put ${result.file} on the clipboard. Drag it into the page instead\n`);
-    } else if (!result.pasted) {
-      process.stderr.write('the transcript is on your clipboard as a file. Press ⌘V in the page to attach it\n');
     }
     return 0;
   }

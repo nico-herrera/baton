@@ -34,7 +34,7 @@ test('recordings root follows the shared app config', (t) => {
   fs.mkdirSync(path.dirname(config), { recursive: true });
   fs.writeFileSync(config, JSON.stringify({ recordings_dir: '~/Meetings' }));
   assert.equal(resolveRecordingsRoot(undefined, { home }), path.join(home, 'Meetings'));
-  assert.equal(resolveRecordingsRoot('/tmp/override', { home }), '/tmp/override');
+  assert.equal(resolveRecordingsRoot('/tmp/override', { home }), path.resolve('/tmp/override'));
 });
 
 test('newest transcribed session wins and pending sessions remain listable', (t) => {
@@ -76,6 +76,37 @@ test('old sessions get a self-contained fallback handoff', (t) => {
   assert.match(session.document, /Ship the command line split/);
 });
 
+test('a session from another recorder reads through the same contract', (t) => {
+  const root = temporaryDirectory(t);
+  const dir = path.join(root, '2026.08.03-1400');
+  fs.mkdirSync(dir, { recursive: true });
+  // A Windows recorder writes MP4 rather than CAF, names the tracks in the
+  // `files` map, and ends its lines with CRLF. None of that reaches the
+  // public contract, so every one of these assertions must hold.
+  fs.writeFileSync(
+    path.join(dir, 'transcript.md'),
+    '# 2026.08.03-1400\r\n\r\nengine: test\r\n\r\n**[0:01] me:** Ship the Windows recorder.\r\n',
+  );
+  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({
+    duration_seconds: 92,
+    clean_stop: true,
+    name: 'Windows port kickoff',
+    files: { mic: 'mic.m4a', system: 'system.m4a' },
+  }));
+  fs.writeFileSync(path.join(dir, 'mic.m4a'), '');
+  fs.writeFileSync(path.join(dir, 'system.m4a'), '');
+
+  const session = resolveSession(root);
+  // The directory stays the identifier, and the name is what a reader sees.
+  assert.equal(session.name, '2026.08.03-1400');
+  assert.equal(session.title, 'Windows port kickoff');
+  assert.equal(session.duration, '1m32s');
+  assert.equal(session.segments, 1);
+  assert.match(session.document, /^# Meeting handoff: Windows port kickoff$/m);
+  assert.match(session.document, /Ship the Windows recorder/);
+  assert.deepEqual(listSessions(root).map((entry) => entry.status), ['ready']);
+});
+
 test('arbitrary transcript files work without the macOS app', (t) => {
   const dir = temporaryDirectory(t);
   const file = path.join(dir, 'planning notes.txt');
@@ -98,8 +129,8 @@ test('published executable stages a file without running an agent', (t) => {
     { encoding: 'utf8' },
   );
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stderr, /staged .*\.meeting\/meeting\.md/);
-  assert.match(result.stdout, /Read \.meeting\/meeting\.md/);
+  assert.match(result.stderr, /staged .*\.meeting[\\/]meeting\.md/);
+  assert.match(result.stdout, /Read \.meeting[\\/]meeting\.md/);
   assert.match(
     fs.readFileSync(path.join(repo, '.meeting', 'meeting.md'), 'utf8'),
     /command-line client into its own package boundary/,

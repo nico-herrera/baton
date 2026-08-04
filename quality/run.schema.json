@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchthrough.dev/schemas/corpus-run-v1.json",
+  "title": "Patchthrough corpus run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_version", "platform", "quality_mode", "models", "items"],
+  "properties": {
+    "run_version": { "const": 1 },
+    "platform": { "enum": ["macos", "windows"] },
+    "quality_mode": { "enum": ["standard", "max_accuracy"] },
+    "models": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "text", "processing_ms", "applied_vocabulary"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "text": { "type": "string" },
+          "processing_ms": { "type": "integer", "minimum": 0 },
+          "applied_vocabulary": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

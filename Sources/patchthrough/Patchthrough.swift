@@ -5,7 +5,7 @@ import Foundation
 import UserNotifications
 
 @main
-struct Patchthrough: ParsableCommand {
+struct Patchthrough: AsyncParsableCommand {
     private static var releaseVersion: String {
         let key = "CFBundleShortVersionString"
         if let version = Bundle.main.object(forInfoDictionaryKey: key) as? String {
@@ -32,7 +32,7 @@ struct Patchthrough: ParsableCommand {
         commandName: "patchthrough",
         abstract: "Record a meeting, transcribe it on-device, hand the transcript to your coding agent.",
         version: releaseVersion,
-        subcommands: [Run.self, Hand.self, Transcripts.self, Doctor.self, Install.self],
+        subcommands: [Run.self, Hand.self, Transcripts.self, Doctor.self, Benchmark.self, Install.self],
         defaultSubcommand: Run.self
     )
 }
@@ -329,6 +329,69 @@ struct Doctor: ParsableCommand {
         DoctorReport.print(checks)
         if !DoctorReport.allOK(checks) {
             throw ExitCode(1)
+        }
+    }
+}
+
+/// Model/corpus runner used by scheduled smoke tests and the shared accuracy
+/// harness. It never records and never sends audio off-device.
+struct Benchmark: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "benchmark",
+        abstract: "Transcribe one audio file and emit the shared EngineTranscript JSON."
+    )
+
+    @Option(name: .long, help: "Audio file to transcribe.")
+    var audio: String
+
+    @Option(name: .long, help: "parakeet, whisperkit, or apple-speech.")
+    var engine = "parakeet"
+
+    @Option(name: .long, help: "standard or max_accuracy.")
+    var quality = "standard"
+
+    @Option(name: .long, help: "Project directory used to collect bounded vocabulary evidence.")
+    var project: String?
+
+    @Option(name: .long, help: "Output path (stdout when omitted).")
+    var output: String?
+
+    func run() async throws {
+        guard let mode = QualityMode(rawValue: quality) else {
+            throw ValidationError("quality must be standard or max_accuracy")
+        }
+        let selected: TranscriptionEngine
+        switch engine.lowercased() {
+        case "parakeet": selected = ParakeetEngine()
+        case "whisper", "whisperkit": selected = WhisperKitEngine()
+        case "apple-speech": selected = AppleSpeechEngine()
+        default: throw ValidationError("engine must be parakeet, whisperkit, or apple-speech")
+        }
+        let audioURL = URL(fileURLWithPath: audio).standardizedFileURL
+        guard FileManager.default.fileExists(atPath: audioURL.path) else {
+            throw ValidationError("audio does not exist: \(audioURL.path)")
+        }
+        let normalized = try AudioNormalizer.normalize(
+            audioURL,
+            into: FileManager.default.temporaryDirectory
+                .appendingPathComponent("patchthrough-benchmark", isDirectory: true)
+        )
+        let projectURL = project.map { URL(fileURLWithPath: $0).standardizedFileURL }
+        let context = TranscriptionContext(
+            qualityMode: mode,
+            vocabulary: ProjectVocabulary.collect(projectRoot: projectURL)
+        )
+        try await selected.prepare()
+        defer { Task { await selected.release() } }
+        let transcript = try await selected.transcribe(normalized, context: context)
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        let data = try encoder.encode(transcript) + Data("\n".utf8)
+        if let output {
+            try data.write(to: URL(fileURLWithPath: output), options: .atomic)
+        } else {
+            FileHandle.standardOutput.write(data)
         }
     }
 }

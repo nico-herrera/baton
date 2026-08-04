@@ -287,23 +287,23 @@ Work out what it asks of this codebase, then tell me before changing anything:
 ${ASR_CAVEAT} Don't edit anything until we've agreed the list.`;
 }
 
-function executableCandidates(name, env = process.env) {
+function executableCandidates(name, env = process.env, platform = process.platform) {
   const pathDirs = (env.PATH || '').split(path.delimiter).filter(Boolean);
   const home = os.homedir();
-  const extras = process.platform === 'darwin'
+  const extras = platform === 'darwin'
     ? ['/opt/homebrew/bin', '/usr/local/bin', path.join(home, '.local', 'bin'), path.join(home, '.kimi-code', 'bin')]
     : [path.join(home, '.local', 'bin'), path.join(home, 'bin')];
   const dirs = [...new Set([...pathDirs, ...extras])];
-  const extensions = process.platform === 'win32'
+  const extensions = platform === 'win32'
     ? (env.PATHEXT || '.EXE;.CMD;.BAT').split(';')
     : [''];
   return dirs.flatMap((dir) => extensions.map((extension) => path.join(dir, `${name}${extension}`)));
 }
 
-function findExecutable(name, env = process.env) {
-  return executableCandidates(name, env).find((candidate) => {
+function findExecutable(name, env = process.env, platform = process.platform) {
+  return executableCandidates(name, env, platform).find((candidate) => {
     try {
-      fs.accessSync(candidate, process.platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK);
+      fs.accessSync(candidate, platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK);
       return true;
     } catch {
       return false;
@@ -311,16 +311,49 @@ function findExecutable(name, env = process.env) {
   });
 }
 
-function installedAgents(env = process.env) {
+function installedAgents(env = process.env, platform = process.platform) {
   return Object.keys(KNOWN_AGENTS)
-    .map((name) => ({ name, path: findExecutable(name, env) }))
+    .map((name) => ({ name, path: findExecutable(name, env, platform) }))
     .filter((agent) => agent.path);
 }
 
-function copyToClipboard(text) {
-  if (process.platform !== 'darwin') return false;
-  const result = spawnSync('/usr/bin/pbcopy', [], { input: text, encoding: 'utf8' });
-  return result.status === 0;
+// The Windows tools this file needs live in System32. The paths are absolute,
+// because a PATH lookup for a clipboard tool is a hijacking risk.
+function windowsSystem32(...parts) {
+  return path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', ...parts);
+}
+
+function windowsPowerShell() {
+  return windowsSystem32('WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
+
+// `-EncodedCommand` takes base64 of UTF-16LE, so no shell parser reads the
+// script. Values travel in the environment for the same reason. `-Sta` is the
+// apartment state the Windows clipboard requires.
+function runPowerShell(script, extraEnv, spawn) {
+  return spawn(windowsPowerShell(), [
+    '-NoProfile',
+    '-NonInteractive',
+    '-Sta',
+    '-EncodedCommand',
+    Buffer.from(script, 'utf16le').toString('base64'),
+  ], { env: { ...process.env, ...extraEnv }, stdio: 'ignore' });
+}
+
+// clip.exe reads the console codepage unless the text announces itself. A
+// UTF-16LE byte order mark keeps accented and non-Latin characters intact.
+function copyToClipboard(text, options = {}) {
+  const platform = options.platform || process.platform;
+  const spawn = options.spawn || spawnSync;
+  if (platform === 'darwin') {
+    return spawn('/usr/bin/pbcopy', [], { input: text, encoding: 'utf8' }).status === 0;
+  }
+  if (platform === 'win32') {
+    return spawn(windowsSystem32('clip.exe'), [], {
+      input: Buffer.from(`\ufeff${text}`, 'utf16le'),
+    }).status === 0;
+  }
+  return false;
 }
 
 // The chat websites whose composer takes a pasted file. The app ships the same
@@ -406,29 +439,57 @@ function pctEncoded(value) {
 }
 
 // Put a file on the clipboard as a reference, not as text, so a paste into a
-// chat composer attaches the file. The path goes through argv rather than a
-// script literal, because transcript-derived text must never reach a parser
-// as code. AppleScript exits 0 and empties the clipboard for a path that does
-// not exist, so check first and verify after.
-function copyFileToClipboard(filePath) {
-  if (process.platform !== 'darwin') return false;
+// chat composer attaches the file. The path goes through argv or the
+// environment rather than a script literal, because transcript-derived text
+// must never reach a parser as code. AppleScript exits 0 and empties the
+// clipboard for a path that does not exist, so check first and verify after.
+// Windows needs the same verification, and `SetFileDropList` flushes the
+// clipboard, so the file reference outlives this process.
+function copyFileToClipboard(filePath, options = {}) {
+  const platform = options.platform || process.platform;
+  const spawn = options.spawn || spawnSync;
+  if (platform !== 'darwin' && platform !== 'win32') return false;
   if (!fs.existsSync(filePath)) return false;
+  if (platform === 'win32') {
+    const script = 'try {\n'
+      + '  Add-Type -AssemblyName System.Windows.Forms\n'
+      + '  $files = New-Object System.Collections.Specialized.StringCollection\n'
+      + '  [void]$files.Add($env:PATCHTHROUGH_CLIP_FILE)\n'
+      + '  [System.Windows.Forms.Clipboard]::SetFileDropList($files)\n'
+      + '  if (-not [System.Windows.Forms.Clipboard]::ContainsFileDropList()) { exit 1 }\n'
+      + '} catch { exit 1 }';
+    return runPowerShell(script, { PATCHTHROUGH_CLIP_FILE: filePath }, spawn).status === 0;
+  }
   const script = 'on run argv\nset the clipboard to POSIX file (item 1 of argv)\nend run';
-  if (spawnSync('/usr/bin/osascript', ['-e', script, filePath]).status !== 0) return false;
-  const info = spawnSync('/usr/bin/osascript', ['-e', 'clipboard info'], { encoding: 'utf8' });
+  if (spawn('/usr/bin/osascript', ['-e', script, filePath]).status !== 0) return false;
+  const info = spawn('/usr/bin/osascript', ['-e', 'clipboard info'], { encoding: 'utf8' });
   return (info.stdout || '').includes('furl');
+}
+
+// Open the chat site. The Windows URL never goes through cmd.exe, because the
+// prompt query string is full of percent escapes that cmd expands.
+function openUrl(url, options = {}) {
+  const platform = options.platform || process.platform;
+  const spawn = options.spawn || spawnSync;
+  if (platform === 'win32') {
+    const script = 'Start-Process -FilePath $env:PATCHTHROUGH_URL';
+    return runPowerShell(script, { PATCHTHROUGH_URL: url }, spawn).status === 0;
+  }
+  return spawn('/usr/bin/open', [url]).status === 0;
 }
 
 // The browser that receives the paste. A plain https URL opens in whichever
 // browser macOS chose, so the keystrokes have to go to that one.
-function defaultBrowserName() {
-  if (process.platform !== 'darwin') return null;
+function defaultBrowserName(options = {}) {
+  const platform = options.platform || process.platform;
+  const spawn = options.spawn || spawnSync;
+  if (platform !== 'darwin') return null;
   const script = 'use framework "AppKit"\n'
     + 'set ws to current application\'s NSWorkspace\'s sharedWorkspace()\n'
     + 'set u to current application\'s NSURL\'s URLWithString:"https://example.com"\n'
     + 'set appURL to ws\'s URLForApplicationToOpenURL:u\n'
     + 'return (appURL\'s lastPathComponent()) as text';
-  const result = spawnSync('/usr/bin/osascript', ['-e', script], { encoding: 'utf8' });
+  const result = spawn('/usr/bin/osascript', ['-e', script], { encoding: 'utf8' });
   if (result.status !== 0) return null;
   const name = (result.stdout || '').trim().replace(/\.app$/, '');
   return name || null;
@@ -438,16 +499,20 @@ function defaultBrowserName() {
 // no signed bundle, so macOS attributes Accessibility to the terminal that ran
 // this command. Without that grant the keystroke silently does nothing and
 // osascript still exits 0, so this refuses to try rather than claim success.
-function autoPasteIntoBrowser(browser, settleSeconds = 5) {
-  if (process.platform !== 'darwin') return false;
-  const trusted = spawnSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e',
+// Windows never auto pastes. A synthesized keystroke there has no reliable
+// focus guarantee, so the CLI asks for a manual paste.
+function autoPasteIntoBrowser(browser, settleSeconds = 5, options = {}) {
+  const platform = options.platform || process.platform;
+  const spawn = options.spawn || spawnSync;
+  if (platform !== 'darwin') return false;
+  const trusted = spawn('/usr/bin/osascript', ['-l', 'JavaScript', '-e',
     'ObjC.import("ApplicationServices"); $.AXIsProcessTrusted()'], { encoding: 'utf8' });
   if ((trusted.stdout || '').trim() !== 'true') return false;
   const script = `delay ${settleSeconds}\n`
     + `tell application "${browser}" to activate\n`
     + 'delay 0.4\n'
     + 'tell application "System Events" to keystroke "v" using command down';
-  return spawnSync('/usr/bin/osascript', ['-e', script]).status === 0;
+  return spawn('/usr/bin/osascript', ['-e', script]).status === 0;
 }
 
 // Open a chat website with the transcript on the clipboard. Returns what the
@@ -460,36 +525,53 @@ function handToWeb(siteName, session, options = {}) {
   if (!site) {
     throw new Error(`unknown web target '${siteName}'. Try: ${Object.keys(table).join(', ')}`);
   }
-  if (process.platform !== 'darwin') {
-    throw new Error('web handoffs need macOS, because they use the macOS clipboard');
+  const platform = options.platform || process.platform;
+  if (platform !== 'darwin' && platform !== 'win32') {
+    throw new Error('web handoffs need macOS or Windows, because they use the system clipboard');
   }
   const file = writeHandoffFile(session);
-  const attached = copyFileToClipboard(file);
+  const attached = copyFileToClipboard(file, options);
+  // Windows fails the file reference without an interactive desktop. The
+  // handoff document stands on its own, so send it as text instead.
+  const copiedText = !attached && platform === 'win32'
+    ? copyToClipboard(session.document, options)
+    : false;
   // Build with URL, not string concatenation: a configured URL can already
   // carry a query or a fragment, and appending `?q=` by hand would put the
   // query inside the fragment where the page never reads it.
   const url = new URL(site.newChatURL);
-  if (site.prefillsPrompt) {
+  // The prefilled prompt names an attached file, which the text fallback never
+  // sends. Open a plain chat in that case.
+  if (site.prefillsPrompt && !copiedText) {
     const existing = url.search.replace(/^\?/, '');
     url.search = [existing, `q=${pctEncoded(webPrompt(session))}`].filter(Boolean).join('&');
   }
-  spawnSync('/usr/bin/open', [url.toString()]);
-  const pasted = attached && options.autoPaste !== false
-    ? autoPasteIntoBrowser(defaultBrowserName() || 'Safari')
+  openUrl(url.toString(), options);
+  const pasted = platform === 'darwin' && attached && options.autoPaste !== false
+    ? autoPasteIntoBrowser(defaultBrowserName(options) || 'Safari', 5, options)
     : false;
-  return { site, file, attached, pasted };
+  return { site, file, attached, copiedText, pasted };
 }
 
-function launchAgent(name, prompt, cwd, env = process.env) {
+function launchAgent(name, prompt, cwd, env = process.env, options = {}) {
   const definition = KNOWN_AGENTS[name];
   if (!definition) throw new Error(`unknown agent '${name}'`);
-  const executable = findExecutable(name, env);
+  const platform = options.platform || process.platform;
+  const spawn = options.spawn || spawnSync;
+  const executable = findExecutable(name, env, platform);
   if (!executable) throw new Error(`agent '${name}' is not installed or not on PATH`);
 
+  // npm installs a Windows agent as a .cmd shim, and cmd.exe parses the
+  // argument line of that shim. cmd.exe also reads a newline as the end of the
+  // command, and every prompt here has newlines. A shim agent therefore takes
+  // the prompt from the clipboard rather than from argv.
+  const viaShim = platform === 'win32' && /\.(cmd|bat)$/i.test(executable);
+  const style = viaShim ? 'clipboard' : definition.style;
+
   let args;
-  if (definition.style === 'run') args = ['run', prompt];
-  else if (definition.style === 'clipboard') {
-    if (copyToClipboard(prompt)) {
+  if (style === 'run') args = ['run', prompt];
+  else if (style === 'clipboard') {
+    if (copyToClipboard(prompt, options)) {
       process.stderr.write(`prompt copied. Paste it once ${name} starts\n`);
     } else {
       process.stderr.write(`this agent takes no initial prompt; copy this after it starts:\n\n${prompt}\n\n`);
@@ -497,7 +579,11 @@ function launchAgent(name, prompt, cwd, env = process.env) {
     args = [];
   } else args = [prompt];
 
-  const result = spawnSync(executable, args, { cwd, stdio: 'inherit', env });
+  // A shim needs a shell, and that shell needs the quotes for a path with a
+  // space in it. No transcript text reaches this command line.
+  const result = viaShim
+    ? spawn(`"${executable}"`, [], { cwd, stdio: 'inherit', env, shell: true })
+    : spawn(executable, args, { cwd, stdio: 'inherit', env });
   if (result.error) throw result.error;
   return result.status === null ? 1 : result.status;
 }
@@ -508,8 +594,10 @@ module.exports = {
   webTargets,
   buildHandoffDocument,
   copyFileToClipboard,
+  copyToClipboard,
   defaultBrowserName,
   handToWeb,
+  openUrl,
   pctEncoded,
   webPrompt,
   writeHandoffFile,

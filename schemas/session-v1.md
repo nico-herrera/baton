@@ -6,8 +6,8 @@ stable session identifier. Current app versions use `yyyy.MM.dd-HHmm`.
 ```text
 <recordings root>/<session id>/
 ├── meta.json
-├── mic.caf
-├── system.caf
+├── mic.caf          # container depends on the recorder
+├── system.caf       # container depends on the recorder
 ├── transcript.json
 ├── transcript.md
 └── handoff.md
@@ -29,10 +29,17 @@ engine. Integrations must use the following public contract:
   the recording context, and the verbatim transcript. Prefer `handoff.md` over
   a reconstruction of the instructions from `transcript.md`.
 
+The audio container depends on the recorder. The macOS app writes CAF, because
+that is what Core Audio encodes into. Another recorder writes another
+container. A tool that needs the audio must read the filenames from the `files`
+map in `meta.json`. Never build an audio filename from an assumed extension.
+
 Patchthrough writes these files atomically. The presence of `transcript.json`
 marks a completed transcription. Patchthrough generates `handoff.md`
 immediately after `transcript.json`. Older sessions can lack `handoff.md`, so
 keep a fallback that wraps `transcript.md`.
 
 The recordings root defaults to `~/Recordings`. Both the app and the CLI honor
-`recordings_dir` in `~/.config/patchthrough/config.json`.
+`recordings_dir` in `~/.config/patchthrough/config.json`. Both paths sit under
+the home directory of the user on every platform, so one machine has one
+recordings root and one config file.

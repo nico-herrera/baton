@@ -1,0 +1,10 @@
+{
+  "run_version": 1,
+  "platform": "macos",
+  "quality_mode": "standard",
+  "models": ["parakeet-tdt-0.6b-v2-coreml"],
+  "items": [
+    { "id": "technical", "text": "Deploy Patchthrough version two at 3 PM.", "processing_ms": 900, "applied_vocabulary": ["Patchthrough"] },
+    { "id": "silence", "text": "", "processing_ms": 900, "applied_vocabulary": [] }
+  ]
+}
