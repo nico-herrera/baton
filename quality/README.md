@@ -38,6 +38,10 @@ node quality/bootstrap-corpus.mjs \
   --out ~/.config/patchthrough/evaluation/corpus.draft.json
 ```
 
+On macOS, the bootstrap probes every audio file with `afinfo`, records the real
+track duration, and omits empty tracks. This prevents a long session with a
+stopped microphone from being counted as hours of microphone evidence.
+
 Correct each track independently, change its `reference_status` from `draft` to
 `corrected`, replace `needs_labeling`, and cover these exact category ids:
 `headphones`, `laptop_speakers`, `echo`, `network_degradation`, `accents`,

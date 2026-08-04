@@ -8,7 +8,25 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { dirname, join, relative, resolve, sep } from 'node:path';
+
+function audioDurationSeconds(audioPath, fallback) {
+  if (process.platform !== 'darwin') return fallback;
+
+  try {
+    const output = execFileSync('/usr/bin/afinfo', ['-b', audioPath], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const match = output.match(/\n----\n([0-9]+(?:\.[0-9]+)?) sec,/);
+    if (match) return Number(match[1]);
+  } catch {
+    // Non-CAF inputs or machines without afinfo retain the session metadata
+    // duration. Platform runners validate the audio again before inference.
+  }
+  return fallback;
+}
 
 const args = new Map();
 for (let index = 2; index < process.argv.length; index += 2) {
@@ -39,26 +57,31 @@ for (const entry of readdirSync(recordings, { withFileTypes: true }).filter(entr
   const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
   if (meta.clean_stop !== true || !Number.isFinite(meta.duration_seconds) || meta.duration_seconds <= 0) continue;
 
-  let included = false;
+  let sessionSeconds = 0;
   for (const [track, filename] of Object.entries(meta.files ?? {}).sort()) {
     if (typeof filename !== 'string') continue;
     const audioPath = join(sessionDirectory, filename);
     if (!existsSync(audioPath) || !statSync(audioPath).isFile()) continue;
-    included = true;
+    const trackSeconds = audioDurationSeconds(audioPath, meta.duration_seconds);
+    if (!Number.isFinite(trackSeconds) || trackSeconds <= 0) {
+      console.warn(`skipping empty audio track: ${entry.name}/${filename}`);
+      continue;
+    }
+    sessionSeconds = Math.max(sessionSeconds, trackSeconds);
     items.push({
       id: `${entry.name}-${track}`,
       session_id: entry.name,
       audio: relative(outputDirectory, audioPath).split(sep).join('/'),
       reference: '',
       reference_status: 'draft',
-      duration_seconds: meta.duration_seconds,
+      duration_seconds: trackSeconds,
       categories: ['needs_labeling', track === 'mic' ? 'microphone' : 'system_audio'],
       technical_terms: [],
       context_terms: [],
       readability_preference: 'unscored',
     });
   }
-  if (included) meetingSeconds += meta.duration_seconds;
+  meetingSeconds += sessionSeconds;
 }
 
 mkdirSync(outputDirectory, { recursive: true });
