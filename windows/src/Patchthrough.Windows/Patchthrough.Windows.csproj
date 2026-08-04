@@ -37,4 +37,16 @@
     <ProjectReference Include="..\Patchthrough.Core\Patchthrough.Core.csproj" />
   </ItemGroup>
 
+  <!-- Whisper.net.Runtime.Vulkan guards its Windows natives with a
+       TargetFramework condition but adds its Linux natives unconditionally, so
+       a win-x64 publish carried 61 MB of ELF shared objects that Windows can
+       never load. Drop them once the package targets have run. This project is
+       Windows-only, so no .so file here is ever wanted.
+       Remove this when the package conditions its Linux item group. -->
+  <Target Name="DropLinuxVulkanRuntimes" BeforeTargets="AssignTargetPaths">
+    <ItemGroup>
+      <None Remove="@(None)" Condition="'%(None.Extension)' == '.so'" />
+    </ItemGroup>
+  </Target>
+
 </Project>

@@ -71,6 +71,15 @@ try {
     Assert-True (Test-Path -LiteralPath (Join-Path $expanded 'APACHE-2.0.txt') -PathType Leaf) 'portable ZIP has no Apache license'
     Assert-True (Test-Path -LiteralPath (Join-Path $expanded 'DOTNET-LICENSE.txt') -PathType Leaf) 'portable ZIP has no .NET license'
     Assert-True (Test-Path -LiteralPath (Join-Path $expanded 'DOTNET-THIRD-PARTY-NOTICES.txt') -PathType Leaf) 'portable ZIP has no .NET notices'
+    # Whisper.net.Runtime.Vulkan once added its Linux natives to a win-x64
+    # publish, which put 61 MB of unloadable ELF objects in the download. The
+    # Windows natives ride inside the single-file executable, so a loose .so or
+    # .dylib here means that regressed.
+    # Assert-True evaluates its message eagerly, and strict mode rejects a
+    # property read on an empty array, so name the files in a separate step.
+    $foreign = @(Get-ChildItem -LiteralPath $expanded -Recurse -File -Include '*.so', '*.dylib')
+    $foreignNames = @($foreign | ForEach-Object { $_.Name })
+    Assert-True ($foreign.Count -eq 0) "portable ZIP carries non-Windows native libraries: $($foreignNames -join ', ')"
     if (-not [string]::IsNullOrWhiteSpace($ExpectedVersion)) {
         $actualVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($portableExe).ProductVersion
         Assert-True ($actualVersion -eq $ExpectedVersion) "portable version is '$actualVersion', expected '$ExpectedVersion'"
@@ -88,6 +97,12 @@ try {
 
     $installedExe = Join-Path $installed 'Patchthrough.exe'
     Assert-True (Test-Path -LiteralPath $installedExe -PathType Leaf) 'installer did not install Patchthrough.exe'
+    # The installer copies the same publish directory, so it repeats any stray
+    # native library the ZIP carries. Its [Files] section selects those files on
+    # its own, so assert the installed tree separately.
+    $installedForeign = @(Get-ChildItem -LiteralPath $installed -Recurse -File -Include '*.so', '*.dylib')
+    $installedForeignNames = @($installedForeign | ForEach-Object { $_.Name })
+    Assert-True ($installedForeign.Count -eq 0) "installer carries non-Windows native libraries: $($installedForeignNames -join ', ')"
     Invoke-Process $installedExe
 
     $appPath = 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\App Paths\Patchthrough.exe'
