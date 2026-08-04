@@ -75,8 +75,11 @@ try {
     # publish, which put 61 MB of unloadable ELF objects in the download. The
     # Windows natives ride inside the single-file executable, so a loose .so or
     # .dylib here means that regressed.
+    # Assert-True evaluates its message eagerly, and strict mode rejects a
+    # property read on an empty array, so name the files in a separate step.
     $foreign = @(Get-ChildItem -LiteralPath $expanded -Recurse -File -Include '*.so', '*.dylib')
-    Assert-True ($foreign.Count -eq 0) "portable ZIP carries non-Windows native libraries: $($foreign.Name -join ', ')"
+    $foreignNames = @($foreign | ForEach-Object { $_.Name })
+    Assert-True ($foreign.Count -eq 0) "portable ZIP carries non-Windows native libraries: $($foreignNames -join ', ')"
     if (-not [string]::IsNullOrWhiteSpace($ExpectedVersion)) {
         $actualVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($portableExe).ProductVersion
         Assert-True ($actualVersion -eq $ExpectedVersion) "portable version is '$actualVersion', expected '$ExpectedVersion'"
