@@ -200,7 +200,7 @@ struct Transcripts: ParsableCommand {
     }
 }
 
-struct Run: ParsableCommand {
+struct Run: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "run",
         abstract: "Run the menu-bar daemon (default)."
@@ -212,10 +212,10 @@ struct Run: ParsableCommand {
     @Flag(name: .long, help: "Open the patchthrough window at launch.")
     var window = false
 
-    func run() throws {
-        // ArgumentParser invokes run() on the main thread; promote that fact
-        // to the type system so AppKit calls are cleanly isolated.
-        try MainActor.assumeIsolated { try runMain() }
+    func run() async throws {
+        // AsyncArgumentParser may invoke subcommands from a cooperative
+        // executor. Explicitly hop to the main actor before touching AppKit.
+        try await MainActor.run { try runMain() }
     }
 
     @MainActor
