@@ -97,6 +97,12 @@ try {
 
     $installedExe = Join-Path $installed 'Patchthrough.exe'
     Assert-True (Test-Path -LiteralPath $installedExe -PathType Leaf) 'installer did not install Patchthrough.exe'
+    # The installer copies the same publish directory, so it repeats any stray
+    # native library the ZIP carries. Its [Files] section selects those files on
+    # its own, so assert the installed tree separately.
+    $installedForeign = @(Get-ChildItem -LiteralPath $installed -Recurse -File -Include '*.so', '*.dylib')
+    $installedForeignNames = @($installedForeign | ForEach-Object { $_.Name })
+    Assert-True ($installedForeign.Count -eq 0) "installer carries non-Windows native libraries: $($installedForeignNames -join ', ')"
     Invoke-Process $installedExe
 
     $appPath = 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\App Paths\Patchthrough.exe'
