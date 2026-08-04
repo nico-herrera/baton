@@ -28,3 +28,30 @@ Confidence calibration and `quality-profile.json` must be fitted only on a
 held-out correction split. The production-safe profile keeps Parakeet and
 preserves number forms until a scored profile selects another engine or number
 format. Never commit private audio, references, manifests, or scores.
+
+Bootstrap a private draft from existing Patchthrough sessions without copying
+audio or treating machine output as ground truth:
+
+```sh
+node quality/bootstrap-corpus.mjs \
+  --recordings ~/Recordings \
+  --out ~/.config/patchthrough/evaluation/corpus.draft.json
+```
+
+Correct each track independently, change its `reference_status` from `draft` to
+`corrected`, replace `needs_labeling`, and cover these exact category ids:
+`headphones`, `laptop_speakers`, `echo`, `network_degradation`, `accents`,
+`rapid_speech`, `silence`, `technical_terminology`, `numbers`, and
+`long_recordings`. The scorer refuses to qualify a run while any reference is
+still a draft. Tracks from one meeting share `session_id`, so the three-hour gate
+counts meeting time once while processing budgets still include both tracks.
+
+Run a candidate with one model load across the full corpus:
+
+```sh
+swift run patchthrough benchmark-corpus \
+  --manifest ~/.config/patchthrough/evaluation/corpus.json \
+  --engine whisperkit \
+  --quality max_accuracy \
+  --output ~/.config/patchthrough/evaluation/macos-whisperkit.json
+```

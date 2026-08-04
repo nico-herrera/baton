@@ -32,7 +32,10 @@ struct Patchthrough: AsyncParsableCommand {
         commandName: "patchthrough",
         abstract: "Record a meeting, transcribe it on-device, hand the transcript to your coding agent.",
         version: releaseVersion,
-        subcommands: [Run.self, Hand.self, Transcripts.self, Doctor.self, Benchmark.self, Install.self],
+        subcommands: [
+            Run.self, Hand.self, Transcripts.self, Doctor.self,
+            Benchmark.self, CorpusBenchmark.self, Install.self,
+        ],
         defaultSubcommand: Run.self
     )
 }
@@ -360,21 +363,17 @@ struct Benchmark: AsyncParsableCommand {
         guard let mode = QualityMode(rawValue: quality) else {
             throw ValidationError("quality must be standard or max_accuracy")
         }
-        let selected: TranscriptionEngine
-        switch engine.lowercased() {
-        case "parakeet": selected = ParakeetEngine()
-        case "whisper", "whisperkit": selected = WhisperKitEngine()
-        case "apple-speech": selected = AppleSpeechEngine()
-        default: throw ValidationError("engine must be parakeet, whisperkit, or apple-speech")
-        }
+        let selected = try BenchmarkEngine.make(engine)
         let audioURL = URL(fileURLWithPath: audio).standardizedFileURL
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
             throw ValidationError("audio does not exist: \(audioURL.path)")
         }
+        let workspace = FileManager.default.temporaryDirectory
+            .appendingPathComponent("patchthrough-benchmark-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: workspace) }
         let normalized = try AudioNormalizer.normalize(
             audioURL,
-            into: FileManager.default.temporaryDirectory
-                .appendingPathComponent("patchthrough-benchmark", isDirectory: true)
+            into: workspace
         )
         let projectURL = project.map { URL(fileURLWithPath: $0).standardizedFileURL }
         let context = TranscriptionContext(
@@ -392,6 +391,145 @@ struct Benchmark: AsyncParsableCommand {
             try data.write(to: URL(fileURLWithPath: output), options: .atomic)
         } else {
             FileHandle.standardOutput.write(data)
+        }
+    }
+}
+
+/// Runs one engine across a corrected-corpus manifest while keeping its model
+/// loaded. Reloading a 600 MB model for every item would distort the processing
+/// budget and make a three-hour evaluation needlessly slow.
+struct CorpusBenchmark: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "benchmark-corpus",
+        abstract: "Transcribe a corrected corpus and emit the shared score-run JSON."
+    )
+
+    @Option(name: .long, help: "Corrected corpus manifest.")
+    var manifest: String
+
+    @Option(name: .long, help: "parakeet, whisperkit, or apple-speech.")
+    var engine = "parakeet"
+
+    @Option(name: .long, help: "standard or max_accuracy.")
+    var quality = "standard"
+
+    @Option(name: .long, help: "Project directory used to collect bounded vocabulary evidence.")
+    var project: String?
+
+    @Option(name: .long, help: "Output path (stdout when omitted).")
+    var output: String?
+
+    func run() async throws {
+        guard let mode = QualityMode(rawValue: quality) else {
+            throw ValidationError("quality must be standard or max_accuracy")
+        }
+        let manifestURL = URL(fileURLWithPath: manifest).standardizedFileURL
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let corpus = try decoder.decode(
+            BenchmarkCorpusManifest.self,
+            from: Data(contentsOf: manifestURL)
+        )
+        guard !corpus.items.isEmpty else {
+            throw ValidationError("corpus manifest has no items")
+        }
+        guard Set(corpus.items.map(\.id)).count == corpus.items.count else {
+            throw ValidationError("corpus manifest contains duplicate item ids")
+        }
+
+        let selected = try BenchmarkEngine.make(engine)
+        try await selected.prepare()
+        defer { Task { await selected.release() } }
+
+        let workspace = FileManager.default.temporaryDirectory
+            .appendingPathComponent("patchthrough-corpus-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: workspace) }
+
+        let projectURL = project.map { URL(fileURLWithPath: $0).standardizedFileURL }
+        let projectVocabulary = ProjectVocabulary.collect(projectRoot: projectURL)
+        var items: [BenchmarkRun.Item] = []
+        for (index, item) in corpus.items.enumerated() {
+            let audioURL = URL(
+                fileURLWithPath: (item.audio as NSString).expandingTildeInPath,
+                relativeTo: manifestURL.deletingLastPathComponent()
+            ).standardizedFileURL
+            guard FileManager.default.fileExists(atPath: audioURL.path) else {
+                throw ValidationError("audio does not exist for \(item.id): \(audioURL.path)")
+            }
+            let normalized = try AudioNormalizer.normalize(
+                audioURL,
+                into: workspace.appendingPathComponent(String(index), isDirectory: true)
+            )
+            let contextTerms = (item.contextTerms ?? []).map {
+                VocabularyTerm(text: $0, source: "corpus_manifest", weight: 1.5)
+            }
+            let context = TranscriptionContext(
+                qualityMode: mode,
+                vocabulary: projectVocabulary + contextTerms
+            )
+            let transcript = try await selected.transcribe(normalized, context: context)
+            items.append(BenchmarkRun.Item(
+                id: item.id,
+                text: transcript.text,
+                processingMs: transcript.processingDurationMs,
+                appliedVocabulary: transcript.context.appliedTerms,
+                words: transcript.words
+            ))
+        }
+
+        let run = BenchmarkRun(
+            runVersion: 1,
+            platform: "macos",
+            qualityMode: mode,
+            models: [selected.model],
+            items: items
+        )
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        let data = try encoder.encode(run) + Data("\n".utf8)
+        if let output {
+            try data.write(to: URL(fileURLWithPath: output), options: .atomic)
+        } else {
+            FileHandle.standardOutput.write(data)
+        }
+    }
+}
+
+struct BenchmarkCorpusManifest: Decodable {
+    struct Item: Decodable {
+        let id: String
+        let audio: String
+        let contextTerms: [String]?
+    }
+
+    let items: [Item]
+}
+
+struct BenchmarkRun: Encodable {
+    struct Item: Encodable {
+        let id: String
+        let text: String
+        let processingMs: Int
+        let appliedVocabulary: [String]
+        let words: [TimedWord]
+    }
+
+    let runVersion: Int
+    let platform: String
+    let qualityMode: QualityMode
+    let models: [String]
+    let items: [Item]
+}
+
+private enum BenchmarkEngine {
+    static func make(_ name: String) throws -> TranscriptionEngine {
+        switch name.lowercased() {
+        case "parakeet": return ParakeetEngine()
+        case "whisper", "whisperkit": return WhisperKitEngine()
+        case "apple-speech": return AppleSpeechEngine()
+        default: throw ValidationError("engine must be parakeet, whisperkit, or apple-speech")
         }
     }
 }

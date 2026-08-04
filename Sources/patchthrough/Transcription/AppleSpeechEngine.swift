@@ -101,7 +101,8 @@ actor AppleSpeechEngine: TranscriptionEngine {
             text: text,
             language: "en",
             audioDurationMs: audioDuration,
-            processingDurationMs: Int(Double(elapsed.components.seconds) * 1000),
+            processingDurationMs: Int(elapsed.components.seconds * 1_000)
+                + Int(elapsed.components.attoseconds / 1_000_000_000_000_000),
             words: words,
             segments: TranscriptSegmentation.segments(from: words),
             diagnostics: ["runtime": "apple-speech-on-device", "result_count": String(results.count)],

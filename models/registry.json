@@ -58,6 +58,17 @@
       ]
     },
     {
+      "id": "speech-transcriber-system",
+      "engine": "apple-speech",
+      "platforms": ["macos"],
+      "version": "macos-system-asset",
+      "quality_modes": ["standard", "max_accuracy"],
+      "download_bytes": 0,
+      "source": "https://developer.apple.com/documentation/speech/speechtranscriber",
+      "system_asset": true,
+      "managed_by": "macOS"
+    },
+    {
       "id": "parakeet-tdt-0.6b-v2-int8",
       "engine": "parakeet",
       "platforms": ["windows"],
