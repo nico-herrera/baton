@@ -19,7 +19,11 @@ and logs beside each result. A checked box without evidence is not acceptance.
 - [ ] `patchthrough hand <agent>` consumes it without platform reconstruction.
 - [ ] The signed installer reports the expected publisher, installs without
       administrator access, makes `Patchthrough` available in a new terminal, and
-      cleanly removes the executable and its PATH entry on uninstall.
+      cleanly removes the executable and its PATH entry on uninstall. The
+      expected publisher is `SignPath Foundation`, because the certificate is
+      issued to the Foundation rather than to the project. A build signed with
+      the `test-signing` policy reports `Patchthrough (Test)` and Windows does
+      not trust it, so it cannot satisfy this item.
 - [ ] The portable ZIP runs on a clean x64-compatible Windows 10 1809+ or Windows 11 machine
       without a separately installed .NET runtime.
 

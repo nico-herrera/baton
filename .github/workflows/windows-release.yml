@@ -1,0 +1,160 @@
+name: Windows release
+
+# Attaches the Windows assets to a GitHub Release. Actions artifacts expire, so
+# the release is the only permanent home for a public download.
+#
+# The macOS DMG is not built here. It needs a full Xcode and the Developer ID
+# identity, so it stays a local `packaging/make-dist.sh` step (see AGENTS.md).
+# Create the release with the DMG first, and this workflow adds the Windows
+# files to it.
+#
+# Signing is driven by the SIGNPATH_RELEASE_POLICY_SLUG repository variable:
+#
+#   unset  -> builds an UNSIGNED release, which is what a preview needs before
+#             the SignPath Foundation certificate is approved
+#   set    -> signs with that policy and verifies the chain strictly
+#
+# So the first signed release needs no change to this file, only the variable.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and attach assets to
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  SIGNPATH_ORGANIZATION_ID: 8419c72b-25cc-44d7-8930-8d71804621b5
+  SIGNPATH_POLICY_SLUG: ${{ vars.SIGNPATH_RELEASE_POLICY_SLUG }}
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    steps:
+      - name: Resolve the release tag
+        shell: pwsh
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          $tag = if (-not [string]::IsNullOrWhiteSpace($env:EVENT_TAG)) {
+            $env:EVENT_TAG
+          } else {
+            $env:INPUT_TAG
+          }
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw 'No release tag was supplied'
+          }
+          # build-release.ps1 validates the version itself, but failing here
+          # costs seconds instead of a full publish.
+          $version = $tag -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
+            throw "Tag '$tag' does not carry a version that build-release.ps1 accepts"
+          }
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+
+      # A manual run dispatches from a branch, so the tag must be explicit or
+      # the build would package whatever that branch currently holds.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install verified Inno Setup compiler
+        uses: ./.github/actions/inno-setup
+        with:
+          github-token: ${{ github.token }}
+
+      - name: Install the SignPath module
+        if: vars.SIGNPATH_RELEASE_POLICY_SLUG != ''
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name SignPath -Force -Scope CurrentUser
+
+      - name: Build the release artifacts
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        run: |
+          $signing = @()
+          if (-not [string]::IsNullOrWhiteSpace($env:SIGNPATH_POLICY_SLUG)) {
+            if ([string]::IsNullOrWhiteSpace($env:SIGNPATH_API_TOKEN)) {
+              throw 'SIGNPATH_RELEASE_POLICY_SLUG is set but the SIGNPATH_API_TOKEN secret is missing'
+            }
+            $signing = @(
+              '-SignPathApiToken', $env:SIGNPATH_API_TOKEN,
+              '-SignPathOrganizationId', $env:SIGNPATH_ORGANIZATION_ID,
+              '-SignPathSigningPolicySlug', $env:SIGNPATH_POLICY_SLUG
+            )
+            Write-Host "Signing with policy '$env:SIGNPATH_POLICY_SLUG'"
+          } else {
+            Write-Warning 'SIGNPATH_RELEASE_POLICY_SLUG is not set, so this release is UNSIGNED'
+          }
+          & windows/packaging/build-release.ps1 `
+            -Version $env:RELEASE_VERSION `
+            -InnoCompiler $env:ISCC_PATH `
+            @signing
+
+      - name: Exercise Windows ZIP, installer, and uninstaller
+        shell: pwsh
+        run: windows/packaging/verify-release.ps1 -ExpectedVersion $env:RELEASE_VERSION
+
+      # build-release.ps1 verifies each signature as it signs. This proves the
+      # signature reached the files a user actually downloads, which is what
+      # the ZIP and the installer contain after packaging.
+      - name: Report what the assets carry
+        shell: pwsh
+        run: |
+          $scratch = Join-Path $env:RUNNER_TEMP 'release-check'
+          Expand-Archive -LiteralPath 'dist/Patchthrough-windows-x64.zip' -DestinationPath $scratch
+          $signed = -not [string]::IsNullOrWhiteSpace($env:SIGNPATH_POLICY_SLUG)
+          $targets = @(
+            (Join-Path $scratch 'Patchthrough.exe'),
+            'dist/Patchthrough-windows-x64-setup.exe'
+          )
+          $lines = @()
+          foreach ($target in $targets) {
+            $name = [System.IO.Path]::GetFileName($target)
+            $signature = Get-AuthenticodeSignature -LiteralPath $target
+            $subject = if ($null -ne $signature.SignerCertificate) {
+              $signature.SignerCertificate.Subject
+            } else {
+              'unsigned'
+            }
+            if ($signed -and $null -eq $signature.SignerCertificate) {
+              throw "$target is unsigned but a signing policy is configured"
+            }
+            $lines += "| $name | $subject | $($signature.Status) |"
+          }
+          $summary = @(
+            "## Windows $env:RELEASE_TAG",
+            '',
+            '| Asset | Publisher | Signature status |',
+            '| --- | --- | --- |'
+          ) + $lines
+          if (-not $signed) {
+            $summary += ''
+            $summary += '**This release is unsigned.** Windows shows an unknown publisher and SmartScreen warns on download.'
+          }
+          $summary -join "`n" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Attach the Windows assets to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload $env:RELEASE_TAG `
+            dist/Patchthrough-windows-x64.zip `
+            dist/Patchthrough-windows-x64.zip.sha256 `
+            dist/Patchthrough-windows-x64-setup.exe `
+            dist/Patchthrough-windows-x64-setup.exe.sha256 `
+            --clobber

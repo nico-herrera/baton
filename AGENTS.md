@@ -240,12 +240,21 @@ The app and the CLI release independently from this repo:
   `dist/Patchthrough-arm64.dmg` + `.sha256`; `./packaging/notarize.sh
   dist/Patchthrough-arm64.dmg` then notarizes and staples it (not optional —
   macOS 15+ blocks un-notarized downloads). App tags look like `v1.0.2`.
-- Windows: `windows\packaging\build-release.ps1 -Version <version>` builds
-  `Patchthrough-windows-x64.zip`, the per-user setup executable, and SHA-256
-  files. CI artifacts are unsigned previews. A public build also requires a
-  certificate thumbprint, successful Authenticode verification, and completed
-  physical-hardware acceptance. Do not describe Windows as generally available
-  or add a public download until those gates pass.
+- Windows: the `Windows release` workflow attaches
+  `Patchthrough-windows-x64.zip`, the per-user setup executable, and both
+  SHA-256 files to a published release. Create the release with the DMG first,
+  and the workflow adds the Windows files to it. Run
+  `windows\packaging\build-release.ps1 -Version <version>` for a local build.
+  Signing goes through SignPath, not a local certificate. Pass
+  `-SignPathApiToken`, `-SignPathOrganizationId`, and
+  `-SignPathSigningPolicySlug`; `-CertificateThumbprint` remains only for a
+  local signtool build. The release workflow signs when the
+  `SIGNPATH_RELEASE_POLICY_SLUG` repository variable is set, and builds
+  unsigned when it is not. Only the `test-signing` policy exists today, and its
+  self-signed certificate is for pipeline validation, so a public download also
+  needs the SignPath Foundation certificate and completed physical-hardware
+  acceptance. Do not describe Windows as generally available until those gates
+  pass.
 - CLI: `cd cli && npm publish`. CLI tags look like `cli-v2.0.0`. The CLI's
   major version starts at 2 (the 1.x npm package was an app installer).
 
