@@ -59,3 +59,20 @@ swift run patchthrough benchmark-corpus \
   --quality max_accuracy \
   --output ~/.config/patchthrough/evaluation/macos-whisperkit.json
 ```
+
+Prepare a private, browser-based correction packet after candidate runs finish:
+
+```sh
+node quality/prepare-review.mjs \
+  --manifest ~/.config/patchthrough/evaluation/corpus.draft.json \
+  --run parakeet=~/.config/patchthrough/evaluation/macos-parakeet.json \
+  --run apple_speech=~/.config/patchthrough/evaluation/macos-apple-speech.json \
+  --run whisperkit=~/.config/patchthrough/evaluation/macos-whisperkit.json \
+  --seed parakeet \
+  --out ~/.config/patchthrough/evaluation/review.html
+```
+
+The packet is a single local HTML file. It plays each source track, keeps edits
+in browser storage, compares every supplied hypothesis, and exports a new
+manifest. A machine hypothesis is never marked corrected automatically: the
+reviewer must verify the audio and check the approval box for that track.

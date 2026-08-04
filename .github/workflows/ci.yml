@@ -20,6 +20,8 @@ jobs:
         run: node tools/verify-contracts.mjs
       - name: Exercise release-gate scorer
         run: node quality/score.mjs --manifest quality/fixtures/corpus.json --candidate quality/fixtures/candidate.json --baseline quality/fixtures/baseline.json --out /tmp/patchthrough-score.json
+      - name: Test private review packet generator
+        run: node --test quality/prepare-review.test.mjs
       - name: Test CLI
         working-directory: cli
         run: npm test
@@ -42,6 +44,8 @@ jobs:
         run: node tools/verify-contracts.mjs
       - name: Exercise release-gate scorer
         run: node quality/score.mjs --manifest quality/fixtures/corpus.json --candidate quality/fixtures/candidate.json --baseline quality/fixtures/baseline.json --out patchthrough-score.json
+      - name: Test private review packet generator
+        run: node --test quality/prepare-review.test.mjs
       - name: Test CLI
         working-directory: cli
         run: npm test
