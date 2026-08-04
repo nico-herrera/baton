@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <!-- All NuGet graphs are checked in and immutable during normal restores.
+         Pass RestoreLockedMode=false with force-evaluate only after reviewing
+         an intentional dependency change. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode>true</RestoreLockedMode>
+  </PropertyGroup>
+</Project>

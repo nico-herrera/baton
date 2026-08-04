@@ -3,11 +3,19 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>Patchthrough</AssemblyName>
     <RootNamespace>Patchthrough.Windows</RootNamespace>
+    <Product>Patchthrough</Product>
+    <Description>Record meetings and transcribe them entirely on this Windows PC.</Description>
+    <Company>Nico Herrera</Company>
+    <Copyright>Copyright © Nico Herrera</Copyright>
+    <ApplicationIcon>..\..\packaging\patchthrough.ico</ApplicationIcon>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- NuGet's plain Version="1.2.3" syntax is only a minimum. Exact direct
+         ranges plus a locked transitive graph keep release restores fixed. -->
     <!-- Lets this project compile on macOS and Linux. It cannot run there, but
          a compile catches every wrong API name and signature. -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
@@ -17,12 +25,12 @@
     <!-- The narrow packages on purpose. The NAudio meta-package pulls in
          NAudio.WinForms, whose framework reference does not resolve off
          Windows, and this project has no forms. -->
-    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
-    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.4" />
-    <PackageReference Include="SharpCompress" Version="0.50.1" />
-    <PackageReference Include="Whisper.net" Version="1.9.1" />
-    <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
-    <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.1" />
+    <PackageReference Include="NAudio.Wasapi" Version="[2.2.1]" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="[1.13.4]" />
+    <PackageReference Include="SharpCompress" Version="[0.50.1]" />
+    <PackageReference Include="Whisper.net" Version="[1.9.1]" />
+    <PackageReference Include="Whisper.net.Runtime" Version="[1.9.1]" />
+    <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="[1.9.1]" />
   </ItemGroup>
 
   <ItemGroup>

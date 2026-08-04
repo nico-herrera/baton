@@ -58,3 +58,46 @@ jobs:
       - name: Verify session contract
         shell: pwsh
         run: windows/verify-contract.ps1
+      - name: Install verified Inno Setup compiler
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $asset = 'innosetup-6.7.3.exe'
+          $download = Join-Path $env:RUNNER_TEMP $asset
+          $install = Join-Path $env:RUNNER_TEMP 'inno-setup-6.7.3'
+          gh release download is-6_7_3 --repo jrsoftware/issrc --pattern $asset --dir $env:RUNNER_TEMP
+          Push-Location $env:RUNNER_TEMP
+          try {
+            gh release verify-asset $asset --repo jrsoftware/issrc
+          } finally {
+            Pop-Location
+          }
+          $process = Start-Process -FilePath $download -ArgumentList @(
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$install`""
+          ) -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Inno Setup installer exited with code $($process.ExitCode)"
+          }
+          $compiler = Join-Path $install 'ISCC.exe'
+          if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
+            throw "Inno Setup compiler was not installed at $compiler"
+          }
+          "ISCC_PATH=$compiler" >> $env:GITHUB_ENV
+      - name: Build Windows ZIP and installer
+        shell: pwsh
+        run: windows/packaging/build-release.ps1 -Version 0.0.0-ci -InnoCompiler $env:ISCC_PATH
+      - name: Exercise Windows ZIP, installer, and uninstaller
+        shell: pwsh
+        run: windows/packaging/verify-release.ps1 -ExpectedVersion 0.0.0-ci
+      - name: Upload unsigned Windows preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: Patchthrough-windows-x64-preview
+          path: |
+            dist/Patchthrough-windows-x64.zip
+            dist/Patchthrough-windows-x64.zip.sha256
+            dist/Patchthrough-windows-x64-setup.exe
+            dist/Patchthrough-windows-x64-setup.exe.sha256
+          if-no-files-found: error
+          retention-days: 14
