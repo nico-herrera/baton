@@ -69,7 +69,7 @@ jobs:
           gh release download is-6_7_3 --repo jrsoftware/issrc --pattern $asset --dir $env:RUNNER_TEMP
           Push-Location $env:RUNNER_TEMP
           try {
-            gh release verify-asset $asset --repo jrsoftware/issrc
+            gh release verify-asset is-6_7_3 $asset --repo jrsoftware/issrc
           } finally {
             Pop-Location
           }
