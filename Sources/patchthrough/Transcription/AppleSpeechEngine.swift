@@ -24,7 +24,7 @@ actor AppleSpeechEngine: TranscriptionEngine {
 
     nonisolated let name = "apple-speech"
     nonisolated let model = "speech-transcriber-system"
-    private var transcriber: Any?
+    private var locale: Locale?
 
     func prepare() async throws {
         guard #available(macOS 26, *) else { throw EngineError.unsupportedOperatingSystem }
@@ -36,12 +36,17 @@ actor AppleSpeechEngine: TranscriptionEngine {
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [module]) {
             try await request.downloadAndInstall()
         }
-        transcriber = module
+        self.locale = locale
     }
 
     func transcribe(_ audio: URL, context: TranscriptionContext) async throws -> EngineTranscript {
         guard #available(macOS 26, *) else { throw EngineError.unsupportedOperatingSystem }
-        guard let module = transcriber as? SpeechTranscriber else { throw EngineError.unavailable }
+        guard let locale else { throw EngineError.unavailable }
+        // SpeechTranscriber.results is a single-use stream tied to one
+        // SpeechAnalyzer lifecycle. Reusing a module for the next corpus item
+        // traps inside the framework, so share the installed asset and create a
+        // fresh module for every audio file.
+        let module = SpeechTranscriber(locale: locale, preset: .timeIndexedTranscriptionWithAlternatives)
         let audioFile = try AVAudioFile(forReading: audio)
         let analysisContext = AnalysisContext()
         analysisContext.contextualStrings[.general] = context.vocabulary.prefix(64).map(\.text)
@@ -114,7 +119,7 @@ actor AppleSpeechEngine: TranscriptionEngine {
         )
     }
 
-    func release() async { transcriber = nil }
+    func release() async { locale = nil }
 }
 #else
 /// Xcode 16 ships the macOS 15 SDK, which does not declare SpeechTranscriber.
