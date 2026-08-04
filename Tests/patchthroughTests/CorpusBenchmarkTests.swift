@@ -13,7 +13,7 @@ import Testing
         runVersion: 1,
         platform: "macos",
         qualityMode: .maxAccuracy,
-        models: ["whisper-large-v3-turbo-coreml-626mb"],
+        models: ["speech-transcriber-system"],
         items: [.init(
             id: "meeting-mic",
             text: "Patchthrough",

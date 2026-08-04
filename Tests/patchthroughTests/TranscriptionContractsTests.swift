@@ -65,7 +65,7 @@ import Testing
         TimedWord(text: "Patchthrough", startMs: 100, endMs: 600, confidence: 0.95),
         TimedWord(text: "ships", startMs: 700, endMs: 1_000, confidence: 0.55),
     ])
-    let secondary = hypothesis("whisperkit", [
+    let secondary = hypothesis("apple-speech", [
         TimedWord(text: "patchthrough", startMs: 120, endMs: 620, confidence: 0.70),
         TimedWord(text: "ships.", startMs: 710, endMs: 1_010, confidence: 0.96),
     ])
@@ -80,13 +80,14 @@ import Testing
 @Test func maxAccuracyConsensusIsEvidenceGated() {
     #expect(!QualityProfile.safeDefault.consensusQualified)
     #expect(!QualityProfile.safeDefault.maxAccuracyAvailable)
+    #expect(QualityProfile.safeDefault.engines(configured: "auto", mode: .standard) == ["parakeet"])
     #expect(QualityProfile.safeDefault.engines(configured: "auto", mode: .maxAccuracy) == ["parakeet"])
 }
 
 @Test func maxAccuracyAvailabilityRequiresAQualifiedReleaseProfile() {
     let profile = QualityProfile(
         standardEngine: "parakeet",
-        maxAccuracyEngines: ["whisperkit"],
+        maxAccuracyEngines: ["apple-speech"],
         consensusQualified: false,
         calibration: [:],
         evidence: .init(
@@ -97,7 +98,7 @@ import Testing
     )
 
     #expect(profile.maxAccuracyAvailable)
-    #expect(profile.engines(configured: "auto", mode: .maxAccuracy) == ["whisperkit"])
+    #expect(profile.engines(configured: "auto", mode: .maxAccuracy) == ["apple-speech"])
 }
 
 @Test func consensusDoesNotAlignIdenticalWordsAtUnrelatedTimes() {
@@ -109,7 +110,7 @@ import Testing
             context: EngineContextEvidence(requestedTerms: [], detectedTerms: [], appliedTerms: []))
     }
     let early = hypothesis("parakeet", TimedWord(text: "yes", startMs: 0, endMs: 300, confidence: 0.9))
-    let late = hypothesis("whisperkit", TimedWord(text: "yes", startMs: 8_000, endMs: 8_300, confidence: 0.9))
+    let late = hypothesis("apple-speech", TimedWord(text: "yes", startMs: 8_000, endMs: 8_300, confidence: 0.9))
 
     let result = TranscriptConsensus.combine(early, late)
 

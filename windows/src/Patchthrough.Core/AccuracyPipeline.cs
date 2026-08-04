@@ -24,6 +24,8 @@ public sealed record QualityProfile
     public required IReadOnlyDictionary<string, ConfidenceCalibration> Calibration { get; init; }
     public EvidenceRecord? Evidence { get; init; }
 
+    // Windows auto-selection remains on the recoverable sherpa-onnx Parakeet
+    // path until a corrected-corpus profile explicitly qualifies another engine.
     public static QualityProfile SafeDefault { get; } = new()
     {
         StandardEngine = "parakeet",

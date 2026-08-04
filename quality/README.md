@@ -55,9 +55,9 @@ Run a candidate with one model load across the full corpus:
 ```sh
 swift run patchthrough benchmark-corpus \
   --manifest ~/.config/patchthrough/evaluation/corpus.json \
-  --engine whisperkit \
+  --engine apple-speech \
   --quality max_accuracy \
-  --output ~/.config/patchthrough/evaluation/macos-whisperkit.json
+  --output ~/.config/patchthrough/evaluation/macos-apple-speech.json
 ```
 
 Prepare a private, browser-based correction packet after candidate runs finish:
@@ -67,7 +67,6 @@ node quality/prepare-review.mjs \
   --manifest ~/.config/patchthrough/evaluation/corpus.draft.json \
   --run parakeet=~/.config/patchthrough/evaluation/macos-parakeet.json \
   --run apple_speech=~/.config/patchthrough/evaluation/macos-apple-speech.json \
-  --run whisperkit=~/.config/patchthrough/evaluation/macos-whisperkit.json \
   --seed parakeet \
   --audio-dir ~/.config/patchthrough/evaluation/review-audio \
   --out ~/.config/patchthrough/evaluation/review.html
@@ -79,3 +78,5 @@ manifest. A machine hypothesis is never marked corrected automatically: the
 reviewer must verify the audio and check the approval box for that track.
 On macOS, `--audio-dir` losslessly repackages the recorder's AAC-in-CAF tracks
 as browser-compatible M4A files while leaving every original recording intact.
+Additional experimental runs, including WhisperKit, may still be supplied with
+another `--run`, but they are not part of the current macOS product shortlist.

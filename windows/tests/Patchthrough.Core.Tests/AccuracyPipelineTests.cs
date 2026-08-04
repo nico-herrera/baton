@@ -28,6 +28,7 @@ public sealed class AccuracyPipelineTests
     public void MaxAccuracyCannotEnableConsensusWithoutEvidenceProfile()
     {
         Assert.False(QualityProfile.SafeDefault.ConsensusQualified);
+        Assert.Equal(["parakeet"], QualityProfile.SafeDefault.Engines("auto", QualityMode.Standard));
         Assert.Equal(["parakeet"], QualityProfile.SafeDefault.Engines("auto", QualityMode.MaxAccuracy));
     }
 

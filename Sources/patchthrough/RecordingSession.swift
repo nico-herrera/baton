@@ -2,8 +2,8 @@ import Foundation
 
 /// One meeting recording: a timestamped folder holding two independent tracks
 /// (mic = you, system = them) plus a meta.json written on clean stop. Tracks
-/// are separate on purpose. Whisper does better on clean single-source audio,
-/// and two tracks give free two-party diarization.
+/// are separate so every engine receives clean single-source audio and the
+/// product retains reliable two-party diarization.
 final class RecordingSession {
     let dir: URL
     let startedAt = Date()
