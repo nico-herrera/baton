@@ -88,7 +88,7 @@ var
   Index: Integer;
 begin
   Result := False;
-  Entries := SplitString(CurrentPath, ';');
+  Entries := StringSplit(CurrentPath, [';'], stAll);
   for Index := 0 to GetArrayLength(Entries) - 1 do
   begin
     if IsAppPath(Entries[Index]) then
@@ -129,7 +129,7 @@ begin
   if not RegQueryStringValue(HKCU, UserEnvironmentKey, UserPathValue, CurrentPath) then
     Exit;
 
-  Entries := SplitString(CurrentPath, ';');
+  Entries := StringSplit(CurrentPath, [';'], stAll);
   NewPath := '';
   for Index := 0 to GetArrayLength(Entries) - 1 do
   begin
