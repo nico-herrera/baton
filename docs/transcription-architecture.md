@@ -10,12 +10,15 @@ native long-form/VAD behavior and return timed words, raw confidence, language,
 provenance, duration, and diagnostics. `transcript.raw.json` is written before
 consensus, echo filtering, or presentation formatting.
 
-macOS candidates are FluidAudio Parakeet v2 with acoustic CTC vocabulary evidence,
-Whisper Large v3 Turbo through WhisperKit, and the on-device Apple SpeechTranscriber on
-macOS 26+. Windows candidates are sherpa-onnx Parakeet greedy decoding and Whisper
-Large v3 Turbo Q5 through Whisper.net, probing Vulkan before CPU fallbacks. Model
-artifacts are resumable, pinned in `models/registry.json`, and hash-verified before
-loading.
+The active macOS shortlist is FluidAudio Parakeet v2 with acoustic CTC
+vocabulary evidence and the on-device Apple SpeechTranscriber on macOS 26+.
+WhisperKit remains an explicit experimental adapter after missing the current
+processing and silence budgets. Windows uses sherpa-onnx Parakeet greedy
+decoding as its provisional default; Whisper Large v3 Turbo Q5 through
+Whisper.net remains experimental and probes Vulkan before CPU fallbacks. Model
+artifacts are resumable, pinned in `models/registry.json`, and hash-verified
+before loading. See [`engine-selection.md`](engine-selection.md) for the current
+evidence and disposition.
 
 `auto` selection is conservative. A local `~/.config/patchthrough/quality-profile.json`
 may select a different Standard engine, calibrations, or two-engine consensus only when

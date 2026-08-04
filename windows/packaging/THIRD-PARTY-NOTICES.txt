@@ -1,0 +1,49 @@
+Patchthrough for Windows includes the following third-party software.
+
+MIT-licensed components
+-----------------------
+
+NAudio 2.2.1
+Copyright (c) 2023 Mark Heath
+https://github.com/naudio/NAudio
+
+SharpCompress 0.50.1
+Copyright (c) 2025 Adam Hathcock
+https://github.com/adamhathcock/sharpcompress
+
+Whisper.net 1.9.1 and its CPU and Vulkan runtimes
+Copyright (c) 2024 Sandro Hanea
+https://github.com/sandrohanea/whisper.net
+
+whisper.cpp and ggml
+Copyright (c) 2023 Georgi Gerganov
+https://github.com/ggml-org/whisper.cpp
+
+ONNX Runtime
+Copyright (c) Microsoft Corporation
+https://github.com/microsoft/onnxruntime
+
+Microsoft.Extensions.AI.Abstractions, System.IO.Pipelines,
+System.Text.Encodings.Web, and System.Text.Json
+Copyright (c) Microsoft Corporation
+https://github.com/dotnet
+
+These components are distributed under the MIT License. Its permission and
+warranty terms are reproduced in LICENSE.txt in the same directory.
+
+Apache-licensed components
+--------------------------
+
+sherpa-onnx 1.13.4 and its Windows x64 runtime
+Copyright 2019-2023 Xiaomi Corporation
+https://github.com/k2-fsa/sherpa-onnx
+
+These components are distributed under the Apache License, Version 2.0. Its
+complete terms are reproduced in APACHE-2.0.txt in the same directory.
+
+.NET runtime notices
+--------------------
+
+Patchthrough is self-contained and includes the Microsoft .NET runtime. The
+release script copies the runtime's own license and third-party notices into
+the distribution as DOTNET-LICENSE.txt and DOTNET-THIRD-PARTY-NOTICES.txt.

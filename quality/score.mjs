@@ -61,11 +61,11 @@ function measure(run) {
   let contextCorrect = 0;
   let hallucinatedWords = 0;
   let silenceSeconds = 0;
-  let durationSeconds = 0;
   let processingMs = 0;
   let preferred = 0;
   let preferenceVotes = 0;
   const categories = new Map();
+  const sessionDurations = new Map();
 
   for (const item of manifest.items) {
     const hypothesis = hypotheses.get(item.id);
@@ -75,7 +75,11 @@ function measure(run) {
     const itemErrors = distance(reference, actual);
     referenceWords += reference.length;
     errors += itemErrors;
-    durationSeconds += item.duration_seconds;
+    const sessionID = item.session_id ?? item.id;
+    sessionDurations.set(
+      sessionID,
+      Math.max(sessionDurations.get(sessionID) ?? 0, item.duration_seconds),
+    );
     processingMs += hypothesis.processing_ms;
     for (const category of item.categories) {
       const aggregate = categories.get(category) ?? { errors: 0, words: 0 };
@@ -105,6 +109,7 @@ function measure(run) {
     }
   }
 
+  const durationSeconds = [...sessionDurations.values()].reduce((sum, seconds) => sum + seconds, 0);
   return {
     wer: round(errors / Math.max(1, referenceWords)),
     errors,
@@ -144,8 +149,16 @@ const categoryRegression = Object.keys(baselineMetrics.category_wer).some(catego
   (metrics.category_wer[category] ?? 0) - baselineMetrics.category_wer[category] > 0.01);
 const processingBudget = candidate.quality_mode === 'standard' ? 2 : 5;
 const storageBudget = candidate.quality_mode === 'standard' ? 1_500_000_000 : 3_000_000_000;
+const requiredCategories = [
+  'headphones', 'laptop_speakers', 'echo', 'network_degradation', 'accents',
+  'rapid_speech', 'silence', 'technical_terminology', 'numbers', 'long_recordings',
+];
 const gates = {
   private_corpus_at_least_three_hours: manifest.private === true && metrics.recorded_hours >= 3,
+  every_reference_human_corrected:
+    manifest.items.length > 0 && manifest.items.every(item => item.reference_status === 'corrected'),
+  required_private_audio_categories_present:
+    manifest.private === true && requiredCategories.every(category => Object.hasOwn(metrics.category_wer, category)),
   relative_wer_improvement_at_least_15_percent: metrics.relative_wer_improvement >= 0.15,
   technical_term_error_reduction_at_least_25_percent: metrics.technical_term_error_reduction >= 0.25,
   context_precision_at_least_90_percent: metrics.context_applied > 0 && metrics.context_precision >= 0.9,

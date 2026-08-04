@@ -27,8 +27,13 @@ for (const model of registry.models) {
   assert(!ids.has(model.id), `duplicate model ${model.id}`);
   ids.add(model.id);
   assert(/^https:\/\//.test(model.source), `${model.id} source is not HTTPS`);
-  assert(Number.isInteger(model.download_bytes) && model.download_bytes > 0, `${model.id} has no size`);
-  assert(model.archive_sha256 || model.manifest || model.files?.length, `${model.id} has no verification material`);
+  assert(Number.isInteger(model.download_bytes) && model.download_bytes >= 0, `${model.id} has no size`);
+  if (model.system_asset) {
+    assert(model.download_bytes === 0, `${model.id} system asset must not count as a download`);
+  } else {
+    assert(model.download_bytes > 0, `${model.id} downloadable model has no size`);
+    assert(model.archive_sha256 || model.manifest || model.files?.length, `${model.id} has no verification material`);
+  }
   if (model.archive_sha256) assert(/^[a-f0-9]{64}$/.test(model.archive_sha256), `${model.id} archive hash is invalid`);
   for (const file of model.files ?? []) assert(/^[a-f0-9]{64}$/.test(file.sha256), `${model.id}/${file.path} hash is invalid`);
 }
@@ -45,6 +50,7 @@ for (const bytes of Object.values(totals('max_accuracy'))) assert(bytes <= 3_000
 const corpus = read('quality/fixtures/corpus.json');
 const candidate = read('quality/fixtures/candidate.json');
 assert(corpus.corpus_version === 1 && corpus.items.length > 0, 'corpus fixture is invalid');
+assert(corpus.items.every(item => ['draft', 'corrected'].includes(item.reference_status)), 'corpus reference status is invalid');
 assert(candidate.run_version === 1 && candidate.items.length === corpus.items.length, 'score-run fixture is invalid');
 assert(candidate.items.every(item => corpus.items.some(source => source.id === item.id)), 'score run has an unknown item');
 

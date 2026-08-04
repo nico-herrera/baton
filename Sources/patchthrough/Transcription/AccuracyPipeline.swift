@@ -41,11 +41,22 @@ struct QualityProfile: Codable, Sendable {
 
     func engines(configured: String, mode: QualityMode) -> [String] {
         if configured != "auto" { return [configured] }
-        guard evidence?.releaseQualified == true else { return ["parakeet"] }
+        guard isReleaseQualified else { return ["parakeet"] }
         if mode == .maxAccuracy, canRunConsensus, maxAccuracyEngines.count >= 2 {
             return Array(maxAccuracyEngines.prefix(2))
         }
         return [mode == .standard ? standardEngine : (maxAccuracyEngines.first ?? standardEngine)]
+    }
+
+    /// Product UI may offer Max Accuracy only after corrected-corpus evidence
+    /// qualifies the profile. Until then, selecting it would be a cosmetic
+    /// switch over the same recoverable Parakeet baseline.
+    var maxAccuracyAvailable: Bool {
+        isReleaseQualified && !maxAccuracyEngines.isEmpty
+    }
+
+    var isReleaseQualified: Bool {
+        evidence?.releaseQualified == true
     }
 
     var canRunConsensus: Bool {

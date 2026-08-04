@@ -28,3 +28,55 @@ Confidence calibration and `quality-profile.json` must be fitted only on a
 held-out correction split. The production-safe profile keeps Parakeet and
 preserves number forms until a scored profile selects another engine or number
 format. Never commit private audio, references, manifests, or scores.
+
+Bootstrap a private draft from existing Patchthrough sessions without copying
+audio or treating machine output as ground truth:
+
+```sh
+node quality/bootstrap-corpus.mjs \
+  --recordings ~/Recordings \
+  --out ~/.config/patchthrough/evaluation/corpus.draft.json
+```
+
+On macOS, the bootstrap probes every audio file with `afinfo`, records the real
+track duration, and omits empty tracks. This prevents a long session with a
+stopped microphone from being counted as hours of microphone evidence.
+
+Correct each track independently, change its `reference_status` from `draft` to
+`corrected`, replace `needs_labeling`, and cover these exact category ids:
+`headphones`, `laptop_speakers`, `echo`, `network_degradation`, `accents`,
+`rapid_speech`, `silence`, `technical_terminology`, `numbers`, and
+`long_recordings`. The scorer refuses to qualify a run while any reference is
+still a draft. Tracks from one meeting share `session_id`, so the three-hour gate
+counts meeting time once while processing budgets still include both tracks.
+
+Run a candidate with one model load across the full corpus:
+
+```sh
+swift run patchthrough benchmark-corpus \
+  --manifest ~/.config/patchthrough/evaluation/corpus.json \
+  --engine apple-speech \
+  --quality max_accuracy \
+  --output ~/.config/patchthrough/evaluation/macos-apple-speech.json
+```
+
+Prepare a private, browser-based correction packet after candidate runs finish:
+
+```sh
+node quality/prepare-review.mjs \
+  --manifest ~/.config/patchthrough/evaluation/corpus.draft.json \
+  --run parakeet=~/.config/patchthrough/evaluation/macos-parakeet.json \
+  --run apple_speech=~/.config/patchthrough/evaluation/macos-apple-speech.json \
+  --seed parakeet \
+  --audio-dir ~/.config/patchthrough/evaluation/review-audio \
+  --out ~/.config/patchthrough/evaluation/review.html
+```
+
+The packet is a single local HTML file. It plays each source track, keeps edits
+in browser storage, compares every supplied hypothesis, and exports a new
+manifest. A machine hypothesis is never marked corrected automatically: the
+reviewer must verify the audio and check the approval box for that track.
+On macOS, `--audio-dir` losslessly repackages the recorder's AAC-in-CAF tracks
+as browser-compatible M4A files while leaving every original recording intact.
+Additional experimental runs, including WhisperKit, may still be supplied with
+another `--run`, but they are not part of the current macOS product shortlist.

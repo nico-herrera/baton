@@ -61,9 +61,10 @@ Patchthrough ships two programs. They share one file format and nothing else.
 | Hand a transcript to an agent (the CLI) | yes | yes | yes |
 | Hand a transcript to a chat site (the CLI) | yes | yes | no |
 
-The macOS recorder is released today. The Windows recorder is implemented on the
-integration branch but remains a draft until its hardware checklist passes. The CLI
-runs anywhere Node.js runs, and it reads any session that follows the
+The macOS recorder is released today. The Windows recorder is implemented in this
+repository, and CI produces installable unsigned previews, but it remains a preview
+until its physical-hardware checklist passes. The CLI runs anywhere Node.js runs, and
+it reads any session that follows the
 [session v1 contract](schemas/session-v1.md). A recorder for another platform therefore
 needs no change to the CLI.
 
@@ -252,7 +253,9 @@ posture is therefore deliberate:
   HuggingFace.
 - **Exact dependency pins.** Patchthrough pins swift-argument-parser, FluidAudio, and
   WhisperKit with `.exact()`. No version range
-  can pull unreviewed code into a binary that has microphone access.
+  can pull unreviewed code into a binary that has microphone access. Windows uses
+  exact NuGet ranges plus checked-in lock files for every direct and transitive
+  package, and normal restores run in locked mode.
 - **Reviewed baselines.** `packaging/verify-deps.sh` fails the build in three cases:
   the resolved dependencies drift from the committed baseline, the compiled checkout
   does not match the lockfile, or a dependency checkout has local modifications.
@@ -289,6 +292,11 @@ release independently:
 - `./packaging/make-dist.sh <version>` builds the signed disk image.
   `./packaging/notarize.sh` then notarizes and staples the disk image before you attach
   it to a GitHub release.
+- `windows\packaging\build-release.ps1 -Version <version>` builds the self-contained
+  Windows x64 ZIP and per-user installer. CI exercises the full install and uninstall
+  flow, but its artifacts are unsigned previews. Pass `-CertificateThumbprint` for a
+  public build, and do not publish it as supported until
+  [`docs/windows-hardware-acceptance.md`](docs/windows-hardware-acceptance.md) passes.
 - `cd cli && npm publish` publishes the JavaScript CLI. CLI releases use tags such as
   `cli-v2.0.0`. App releases keep `v1.0.2`-style tags.
 

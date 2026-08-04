@@ -20,7 +20,21 @@
           "id": { "type": "string", "minLength": 1 },
           "text": { "type": "string" },
           "processing_ms": { "type": "integer", "minimum": 0 },
-          "applied_vocabulary": { "type": "array", "items": { "type": "string" } }
+          "applied_vocabulary": { "type": "array", "items": { "type": "string" } },
+          "words": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["text", "start_ms", "end_ms"],
+              "properties": {
+                "text": { "type": "string" },
+                "start_ms": { "type": "integer", "minimum": 0 },
+                "end_ms": { "type": "integer", "minimum": 0 },
+                "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+              }
+            }
+          }
         }
       }
     }

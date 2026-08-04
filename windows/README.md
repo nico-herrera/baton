@@ -17,11 +17,13 @@ Milestone 1 is partly built. Be careful about what is verified here.
 | Parakeet through sherpa-onnx | written | compiles and model-free tests pass; hardware/model smoke is scheduled/manual |
 | Whisper Large v3 Turbo Q5 through Whisper.net | written | compiles; probes Vulkan, CPU, then CPU-no-AVX; hardware/model smoke pending |
 | Model download | done in code | resumable and pinned SHA-256 verification; real Windows download/load pending |
+| Portable ZIP and per-user installer | done in code | Windows CI builds the self-contained x64 executable, installs it, runs it, uninstalls it, and verifies SHA-256 files |
+| Authenticode signature | wired, not credentialed | release script signs the app and installer when given a certificate thumbprint; no public certificate is configured yet |
 | Tray application | not started | milestone 2 |
 
 The hardware rows remain the risk. A cross-compiled Windows binary and model-free
 tests prove APIs and contracts, not capture, codecs, GPU selection, or inference on a
-real Windows device. The integration PR stays draft until
+real Windows device. A public Windows release stays a preview until
 [`../docs/windows-hardware-acceptance.md`](../docs/windows-hardware-acceptance.md)
 is complete.
 
@@ -47,17 +49,61 @@ dotnet test              # the session format and the padding arithmetic
 real `Patchthrough.Core` code path and hands it to `cli/bin/patchthrough.js`,
 which is the definition of done for milestone 1.
 
+## Build the Windows packages
+
+On Windows, install Inno Setup 6 or 7 and run:
+
+```powershell
+windows\packaging\build-release.ps1 -Version 1.4.0
+windows\packaging\verify-release.ps1 -ExpectedVersion 1.4.0
+```
+
+The release build uses locked NuGet dependency graphs and produces a self-contained
+single-file executable. A user does not need to install .NET. The output is:
+
+```text
+dist\Patchthrough-windows-x64.zip
+dist\Patchthrough-windows-x64.zip.sha256
+dist\Patchthrough-windows-x64-setup.exe
+dist\Patchthrough-windows-x64-setup.exe.sha256
+```
+
+The installer is x64, per-user, and does not ask for administrator access. It installs
+under the current user's Programs directory, registers `Patchthrough.exe`, and offers
+to add the install directory to the user's `PATH`. The verifier exercises the portable
+executable plus the full install/run/uninstall path on Windows CI. The packaged build
+requires an x64-compatible Windows 10 version 1809 or later, or Windows 11.
+
+CI artifacts are unsigned previews. For a public build, import the Authenticode
+certificate into the current user's certificate store and pass its thumbprint:
+
+```powershell
+windows\packaging\build-release.ps1 -Version 1.4.0 `
+  -CertificateThumbprint $env:PATCHTHROUGH_CERTIFICATE_THUMBPRINT
+```
+
+The script signs and verifies both `Patchthrough.exe` and the installer with SHA-256
+and a trusted timestamp. Do not publish those artifacts as supported Windows builds
+until the physical-hardware checklist also passes.
+
 ## Use
 
 ```
 Patchthrough rec [--out <dir>] [--name <title>]   record a meeting
 Patchthrough transcribe [--out <dir>]             transcribe what is pending
 Patchthrough doctor [--out <dir>]                 check this machine
-Patchthrough benchmark --audio <file> --engine parakeet|whisper
+Patchthrough benchmark --audio <file> --engine parakeet|whisper [--quality standard|max_accuracy]
 ```
 
 `rec` records until Ctrl+C or Enter, then transcribes. A failed transcription
 leaves the audio and meta.json in place, so `transcribe` retries it.
+
+Set `transcription.quality_mode` in the shared config to `standard` or
+`max_accuracy`. Windows keeps both modes on the recoverable Parakeet path unless
+`~/.config/patchthrough/quality-profile.json` contains release-qualified evidence
+from a corrected corpus for another engine. An unqualified profile cannot silently enable
+Whisper or dual-engine consensus; see
+[`../docs/engine-selection.md`](../docs/engine-selection.md).
 
 The explicitly selected model downloads on first use into
 `%LOCALAPPDATA%\patchthrough\models`. Partial files resume. Patchthrough checks the
@@ -67,7 +113,7 @@ what will download without treating a not-yet-cached model as a broken machine.
 
 ## What is left in milestone 1
 
-Every remaining item needs a Windows machine.
+Every remaining item needs a physical Windows machine with real audio hardware.
 
 1. Run `Patchthrough doctor`. It should find the devices and the model.
 2. Record a meeting. Confirm both tracks hold audio.
@@ -123,8 +169,9 @@ no audio file.
    settings.
 3. **Handoffs.** Agents through Windows Terminal, the clipboard, chat sites,
    and deep links.
-4. **Distribution.** Installer, Authenticode signature, and self-exclusion from
-   the loopback capture.
+4. **Distribution.** The portable ZIP and per-user installer are implemented.
+   Authenticode credentials, public release publication, and self-exclusion from the
+   loopback capture remain.
 
 ## Risks to design for, not to discover
 

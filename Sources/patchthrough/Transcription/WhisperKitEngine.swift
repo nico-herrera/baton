@@ -59,7 +59,9 @@ actor WhisperKitEngine: TranscriptionEngine {
             noSpeechThreshold: 0.6,
             chunkingStrategy: .vad
         )
+        let started = ContinuousClock.now
         let groups = await kit.transcribe(audioPaths: [audio.path], decodeOptions: options)
+        let elapsed = ContinuousClock.now - started
         guard let results = groups.first ?? nil, !results.isEmpty else {
             throw EngineError.noResult(audio.lastPathComponent)
         }
@@ -83,7 +85,8 @@ actor WhisperKitEngine: TranscriptionEngine {
         } else {
             audioDuration = words.last?.endMs ?? 0
         }
-        let processingMs = Int(results.reduce(0) { $0 + $1.timings.fullPipeline } * 1000)
+        let processingMs = Int(elapsed.components.seconds * 1_000)
+            + Int(elapsed.components.attoseconds / 1_000_000_000_000_000)
         let sourceSegments = results.flatMap(\.segments)
         let requested = context.vocabulary.map(\.text)
         let detected = requested.filter { term in

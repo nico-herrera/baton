@@ -33,7 +33,7 @@ jobs:
         run: say -o /tmp/patchthrough-smoke.aiff "Patchthrough verifies local transcription models."
       - name: Smoke Parakeet
         run: swift run patchthrough benchmark --audio /tmp/patchthrough-smoke.aiff --engine parakeet --output /tmp/parakeet.json
-      - name: Smoke WhisperKit
+      - name: Smoke experimental WhisperKit adapter
         run: swift run patchthrough benchmark --audio /tmp/patchthrough-smoke.aiff --engine whisperkit --quality max_accuracy --output /tmp/whisperkit.json
 
   windows-model:
@@ -58,5 +58,5 @@ jobs:
           $voice.Dispose()
       - name: Smoke Parakeet
         run: dotnet run --project windows/src/Patchthrough.Windows -c Release -- benchmark --audio "${{ runner.temp }}\patchthrough-smoke.wav" --engine parakeet --output "${{ runner.temp }}\parakeet.json"
-      - name: Smoke Whisper
+      - name: Smoke experimental Whisper adapter
         run: dotnet run --project windows/src/Patchthrough.Windows -c Release -- benchmark --audio "${{ runner.temp }}\patchthrough-smoke.wav" --engine whisper --quality max_accuracy --output "${{ runner.temp }}\whisper.json"

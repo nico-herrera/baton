@@ -10,6 +10,8 @@
 # dependency drift.
 *.lock text eol=lf
 Package.resolved text eol=lf
+packages*.lock.json text eol=lf
 
 # Keep the icon sources out of the normalizer.
 *.png binary
+*.ico binary
