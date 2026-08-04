@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 function usage() {
-  return 'usage: prepare-review.mjs --manifest FILE --run NAME=FILE [--run NAME=FILE ...] --seed NAME --out FILE';
+  return 'usage: prepare-review.mjs --manifest FILE --run NAME=FILE [--run NAME=FILE ...] --seed NAME [--audio-dir DIR] --out FILE';
 }
 
 function parseArguments(argv) {
@@ -48,7 +49,23 @@ function escapeEmbeddedJSON(value) {
     .replaceAll('>', '\\u003e');
 }
 
-function buildPayload(manifestPath, runSpecifications, seedName) {
+function browserAudioURL(audioPath, audioDirectory, itemID) {
+  if (!audioDirectory || !existsSync(audioPath)) return pathToFileURL(audioPath).href;
+  if (process.platform !== 'darwin') {
+    throw new Error('--audio-dir currently requires macOS afconvert');
+  }
+  const safeID = itemID.replaceAll(/[^a-z0-9._-]/giu, '_');
+  const output = join(audioDirectory, `${safeID}.m4a`);
+  mkdirSync(audioDirectory, { recursive: true });
+  if (!existsSync(output)) {
+    execFileSync('/usr/bin/afconvert', [audioPath, output, '-f', 'm4af', '-d', '0'], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+  }
+  return pathToFileURL(output).href;
+}
+
+function buildPayload(manifestPath, runSpecifications, seedName, audioDirectory) {
   const manifest = loadJSON(manifestPath);
   if (!Array.isArray(manifest.items) || manifest.items.length === 0) {
     throw new Error('manifest has no items');
@@ -86,7 +103,7 @@ function buildPayload(manifestPath, runSpecifications, seedName) {
     return {
       id: item.id,
       session_id: item.session_id ?? item.id,
-      audio_url: pathToFileURL(audioPath).href,
+      audio_url: browserAudioURL(audioPath, audioDirectory, item.id),
       audio_exists: existsSync(audioPath),
       duration_seconds: item.duration_seconds,
       categories: item.categories,
@@ -260,8 +277,9 @@ const { values, runs } = parseArguments(process.argv);
 const manifestPath = resolve(values.get('manifest'));
 const output = resolve(values.get('out'));
 if (existsSync(output)) throw new Error(`refusing to overwrite existing review packet: ${output}`);
-const payload = buildPayload(manifestPath, runs, values.get('seed'));
+const audioDirectory = values.has('audio-dir') ? resolve(values.get('audio-dir')) : null;
+const payload = buildPayload(manifestPath, runs, values.get('seed'), audioDirectory);
 writeFileSync(output, documentFor(payload));
 console.log(`wrote private review packet for ${payload.items.length} tracks to ${output}`);
+if (audioDirectory) console.log(`repackaged source audio for browser playback in ${audioDirectory}`);
 console.log(`seeded draft references from ${payload.seed_engine}; review state stays in this browser until exported`);
-

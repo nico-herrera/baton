@@ -69,6 +69,7 @@ node quality/prepare-review.mjs \
   --run apple_speech=~/.config/patchthrough/evaluation/macos-apple-speech.json \
   --run whisperkit=~/.config/patchthrough/evaluation/macos-whisperkit.json \
   --seed parakeet \
+  --audio-dir ~/.config/patchthrough/evaluation/review-audio \
   --out ~/.config/patchthrough/evaluation/review.html
 ```
 
@@ -76,3 +77,5 @@ The packet is a single local HTML file. It plays each source track, keeps edits
 in browser storage, compares every supplied hypothesis, and exports a new
 manifest. A machine hypothesis is never marked corrected automatically: the
 reviewer must verify the audio and check the approval box for that track.
+On macOS, `--audio-dir` losslessly repackages the recorder's AAC-in-CAF tracks
+as browser-compatible M4A files while leaving every original recording intact.
