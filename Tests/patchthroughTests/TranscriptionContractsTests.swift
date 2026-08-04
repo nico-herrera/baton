@@ -79,7 +79,25 @@ import Testing
 
 @Test func maxAccuracyConsensusIsEvidenceGated() {
     #expect(!QualityProfile.safeDefault.consensusQualified)
+    #expect(!QualityProfile.safeDefault.maxAccuracyAvailable)
     #expect(QualityProfile.safeDefault.engines(configured: "auto", mode: .maxAccuracy) == ["parakeet"])
+}
+
+@Test func maxAccuracyAvailabilityRequiresAQualifiedReleaseProfile() {
+    let profile = QualityProfile(
+        standardEngine: "parakeet",
+        maxAccuracyEngines: ["whisperkit"],
+        consensusQualified: false,
+        calibration: [:],
+        evidence: .init(
+            releaseQualified: true,
+            dualEngineRelativeWerImprovement: nil,
+            consensusNoCategoryRegression: nil
+        )
+    )
+
+    #expect(profile.maxAccuracyAvailable)
+    #expect(profile.engines(configured: "auto", mode: .maxAccuracy) == ["whisperkit"])
 }
 
 @Test func consensusDoesNotAlignIdenticalWordsAtUnrelatedTimes() {

@@ -1173,6 +1173,7 @@ struct SettingsView: View {
 
     @State private var recordingsDir = ""
     @State private var transcribe = true
+    @State private var qualityMode = QualityMode.standard
     @State private var voiceProcessing = false
     @State private var autoPaste = false
     @State private var launchAtLogin = false
@@ -1196,6 +1197,7 @@ struct SettingsView: View {
     /// Only terminals that are on this Mac. An absent terminal produces a
     /// handoff that silently does nothing.
     private let terminals = TerminalApp.installed()
+    private let qualityProfile = QualityProfile.load()
 
     private enum Field: Hashable { case recordingsDir, hook, customLabel(UUID), customURL(UUID) }
 
@@ -1224,6 +1226,21 @@ struct SettingsView: View {
                         toggleRow("Transcribe after each recording",
                                   subtitle: "On-device, ~20s per hour of audio",
                                   isOn: $transcribe)
+                    }
+                    card {
+                        chooserRow(
+                            "Transcription quality",
+                            subtitle: qualitySubtitle,
+                            selection: qualityMode == .standard ? "Standard" : "Max Accuracy"
+                        ) {
+                            Button("Standard") { qualityMode = .standard }
+                            Button("Max Accuracy") { qualityMode = .maxAccuracy }
+                                .disabled(!qualityProfile.maxAccuracyAvailable)
+                        }
+                    }
+                    if !qualityProfile.maxAccuracyAvailable {
+                        caption("Max Accuracy unlocks only after it beats Standard on corrected "
+                                + "meetings and clears every release gate.")
                     }
                     card {
                         toggleRow("Echo cancellation on the mic",
@@ -1566,6 +1583,10 @@ struct SettingsView: View {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         recordingsDir = resolved.replacingOccurrences(of: home, with: "~")
         transcribe = Config.transcriptionEnabledValue()
+        let configuredQuality = Config.transcriptionQualityMode()
+        qualityMode = configuredQuality == .maxAccuracy && qualityProfile.maxAccuracyAvailable
+            ? .maxAccuracy
+            : .standard
         voiceProcessing = Config.micVoiceProcessing()
         autoPaste = Config.autoPaste()
         launchAtLogin = LaunchAtLogin.isEnabled
@@ -1646,6 +1667,7 @@ struct SettingsView: View {
             try Config.update([
                 "recordings_dir": (trimmedDir.isEmpty || trimmedDir == "~/Recordings") ? nil : trimmedDir,
                 "transcription.enabled": transcribe ? nil : false,
+                "transcription.quality_mode": qualityMode == .standard ? nil : qualityMode.rawValue,
                 "mic_voice_processing": voiceProcessing ? true : nil,
                 "auto_paste": autoPaste ? nil : false,
                 "on_stop": trimmedHook.isEmpty ? nil : trimmedHook,
@@ -1664,6 +1686,17 @@ struct SettingsView: View {
             dismiss()
         } catch {
             self.error = "Couldn't write the config: \(error.localizedDescription)"
+        }
+    }
+
+    private var qualitySubtitle: String {
+        switch qualityMode {
+        case .standard:
+            return "Best qualified engine · up to 2 processing min per recorded hour"
+        case .maxAccuracy:
+            return qualityProfile.canRunConsensus
+                ? "Two complementary engines · up to 5 processing min per recorded hour"
+                : "Highest-quality qualified settings · up to 5 processing min per recorded hour"
         }
     }
 }
