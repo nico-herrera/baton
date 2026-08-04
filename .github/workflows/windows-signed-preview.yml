@@ -1,0 +1,124 @@
+name: Windows signed preview
+
+# Test signing spends SignPath signature quota and needs the SIGNPATH_API_TOKEN
+# secret, so this workflow never runs on a pull request. Start it from the
+# Actions tab after a change to the signing path in build-release.ps1.
+#
+# The signature comes from a self-signed certificate. Windows does not trust it.
+# Never publish the artifacts this workflow produces.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version stamped into the artifacts
+        default: 0.0.0-signed
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  SIGNPATH_ORGANIZATION_ID: 8419c72b-25cc-44d7-8930-8d71804621b5
+  SIGNPATH_POLICY_SLUG: test-signing
+  EXPECTED_SUBJECT: CN=Patchthrough (Test)
+
+jobs:
+  signed-preview:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # Keep this pinned release identical to the one in ci.yml. A version that
+      # drifts between the two workflows makes the signed build differ from the
+      # build that CI verifies.
+      - name: Install verified Inno Setup compiler
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $asset = 'innosetup-6.7.3.exe'
+          $download = Join-Path $env:RUNNER_TEMP $asset
+          $install = Join-Path $env:RUNNER_TEMP 'inno-setup-6.7.3'
+          gh release download is-6_7_3 --repo jrsoftware/issrc --pattern $asset --dir $env:RUNNER_TEMP
+          Push-Location $env:RUNNER_TEMP
+          try {
+            gh release verify-asset is-6_7_3 $asset --repo jrsoftware/issrc
+          } finally {
+            Pop-Location
+          }
+          $process = Start-Process -FilePath $download -ArgumentList @(
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$install`""
+          ) -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Inno Setup installer exited with code $($process.ExitCode)"
+          }
+          $compiler = Join-Path $install 'ISCC.exe'
+          if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
+            throw "Inno Setup compiler was not installed at $compiler"
+          }
+          "ISCC_PATH=$compiler" >> $env:GITHUB_ENV
+
+      - name: Install the SignPath module
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name SignPath -Force -Scope CurrentUser
+
+      - name: Build and test-sign
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          BUILD_VERSION: ${{ inputs.version }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SIGNPATH_API_TOKEN)) {
+            throw 'The SIGNPATH_API_TOKEN secret is not set for this repository'
+          }
+          windows/packaging/build-release.ps1 `
+            -Version $env:BUILD_VERSION `
+            -InnoCompiler $env:ISCC_PATH `
+            -SignPathApiToken $env:SIGNPATH_API_TOKEN `
+            -SignPathOrganizationId $env:SIGNPATH_ORGANIZATION_ID `
+            -SignPathSigningPolicySlug $env:SIGNPATH_POLICY_SLUG `
+            -AllowUntrustedSignature
+
+      # build-release.ps1 already checks each signature as it signs. This step
+      # proves the signed executable survived both the ZIP and the installer,
+      # which is what a release actually ships.
+      - name: Assert the shipped executables carry the signature
+        shell: pwsh
+        run: |
+          $scratch = Join-Path $env:RUNNER_TEMP 'signature-check'
+          Expand-Archive -LiteralPath 'dist/Patchthrough-windows-x64.zip' -DestinationPath $scratch
+          $targets = @(
+            (Join-Path $scratch 'Patchthrough.exe'),
+            'dist/Patchthrough-windows-x64-setup.exe'
+          )
+          foreach ($target in $targets) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $target
+            if ($null -eq $signature.SignerCertificate) {
+              throw "$target is not signed"
+            }
+            if ($signature.SignerCertificate.Subject -ne $env:EXPECTED_SUBJECT) {
+              throw "$target reports publisher '$($signature.SignerCertificate.Subject)', expected '$env:EXPECTED_SUBJECT'"
+            }
+            Write-Host "$target is signed by $($signature.SignerCertificate.Subject)"
+          }
+
+      - name: Exercise Windows ZIP, installer, and uninstaller
+        shell: pwsh
+        run: windows/packaging/verify-release.ps1 -ExpectedVersion ${{ inputs.version }}
+
+      - name: Upload test-signed preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: Patchthrough-windows-x64-test-signed
+          path: |
+            dist/Patchthrough-windows-x64.zip
+            dist/Patchthrough-windows-x64.zip.sha256
+            dist/Patchthrough-windows-x64-setup.exe
+            dist/Patchthrough-windows-x64-setup.exe.sha256
+          if-no-files-found: error
+          retention-days: 7
