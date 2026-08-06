@@ -534,6 +534,29 @@ struct PatchthroughRootView: View {
                     .help("Drag the transcript into any chat")
             }
 
+            // Recording was reachable only from the menu bar item. macOS drops a
+            // `.variableLength` status item when the menu bar runs out of room,
+            // which on a notched display happens easily, and an LSUIElement app
+            // has no Dock icon to fall back on — so the app's primary action
+            // could become unreachable while it was still running.
+            // `onToggleRecording` already existed and was wired to the same
+            // `toggle()` as the menu item; only the control was missing.
+            Button { store.onToggleRecording?() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: store.isRecording ? "stop.fill" : "record.circle")
+                        .font(PT.F.gear)
+                    if store.isRecording, !store.elapsed.isEmpty {
+                        Text(store.elapsed).font(PT.F.monoSmall)
+                    }
+                }
+                .foregroundStyle(store.isRecording ? PT.C.signal : PT.C.text3)
+                .frame(height: 24)
+                .padding(.horizontal, 6)
+            }
+            .buttonStyle(.plain)
+            .help(store.isRecording ? "Stop recording" : "Start recording")
+            .keyboardShortcut("r", modifiers: [.command, .shift])
+
             patchSplitButton
 
             // SF `gearshape`, not the mock's own `#i-gear` glyph: that one is a

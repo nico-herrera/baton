@@ -37,7 +37,12 @@ Read it before adding or changing any view.** The short version:
 - Dark mode only. No light variants, no `colorScheme` branches.
 - Selection is a filled row with a ring. Never a coloured left edge bar.
 - The verb is "Patch through to". Sentence case, no emoji.
-- Recording starts in the menu bar, not the window.
+- Recording starts in the menu bar. The window titlebar carries a second
+  record/stop control as a fallback, because macOS hides a `.variableLength`
+  status item once the menu bar runs out of room and an `LSUIElement` app has no
+  Dock icon to fall back on — menu bar only meant the primary action could become
+  unreachable while the app was running. Both paths call the same `toggle()`.
+  Don't delete the window control as a rule violation; it is the exception.
 - `PT.M.turnMaxWidthFraction = 0.78` is load-bearing — raising it silently breaks
   the me-right / them-left transcript layout.
 - Type sizes are fractional on purpose (14.5, 13.5, 12.5, 11.5, 10.5). Rounding
