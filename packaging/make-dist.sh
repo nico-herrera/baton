@@ -25,7 +25,14 @@ VERSION="${1:-}"
 say()  { printf '\033[1m%s\033[0m\n' "$*"; }
 fail() { printf '\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
 
-IDENTITY="Developer ID Application: Nico Herrera (DAB6FR7R2R)"
+# This constant read DAB6FR7R2R until v1.5.0, but no shipped DMG was ever signed
+# with it: notarization history has v1.1.0 through v1.4.0 all submitted under
+# U3W37KR29G, so releases were being cut from a locally edited copy while the
+# tracked script drifted. Same team users already run, so the designated
+# requirement is unchanged — microphone grants and keychain ACLs survive the
+# update. Keep this in sync with make-app.sh; a mismatch fails the Team ID gate
+# below only after a full build.
+IDENTITY="Developer ID Application: Nico Herrera (U3W37KR29G)"
 
 TRACKED_DIRTY="$(git status --porcelain --untracked-files=no)"
 RELEASE_UNTRACKED="$(git ls-files --others --exclude-standard -- \
@@ -55,7 +62,7 @@ APP="dist/patchthrough.app"
 # Refuse to ship an unsigned or wrongly-signed bundle.
 codesign --verify --strict "$APP" 2>/dev/null || fail "bundle is not validly signed"
 TEAM="$(codesign -dvv "$APP" 2>&1 | awk -F= '/^TeamIdentifier=/ && !seen { print $2; seen=1 }')"
-[ "$TEAM" = "DAB6FR7R2R" ] || fail "unexpected Team ID '$TEAM'"
+[ "$TEAM" = "U3W37KR29G" ] || fail "unexpected Team ID '$TEAM'"
 BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 [ "$BUNDLE_VERSION" = "$VERSION" ] \
   || fail "bundle version '$BUNDLE_VERSION' does not match release version '$VERSION'"

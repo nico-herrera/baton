@@ -16,7 +16,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-IDENTITY="Developer ID Application: Nico Herrera (DAB6FR7R2R)"
+IDENTITY="Developer ID Application: Nico Herrera (U3W37KR29G)"
 cd "$REPO"
 
 say()  { printf '\033[1m%s\033[0m\n' "$*"; }
@@ -95,7 +95,7 @@ fi
 #
 # No --deep: Apple deprecated it, and this bundle has no nested code to reach.
 
-if security find-identity -v -p codesigning 2>/dev/null | grep -q "DAB6FR7R2R"; then
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "U3W37KR29G"; then
   say "signing bundle…"
   codesign --force --sign "$IDENTITY" --timestamp \
     --options runtime \

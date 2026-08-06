@@ -12,7 +12,7 @@
 #      (Sign-In and Security → App-Specific Passwords)
 #   2. xcrun notarytool store-credentials patchthrough-notary \
 #        --apple-id "you@example.com" \
-#        --team-id DAB6FR7R2R \
+#        --team-id U3W37KR29G \
 #        --password "xxxx-xxxx-xxxx-xxxx"
 #
 # Then:  ./packaging/notarize.sh dist/Patchthrough-arm64.dmg
