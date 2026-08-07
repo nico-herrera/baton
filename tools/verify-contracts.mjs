@@ -20,6 +20,24 @@ for (const word of fixture.words) {
   assert(word.confidence == null || word.confidence >= 0 && word.confidence <= 1, `word ${word.text} confidence is invalid`);
 }
 
+const notes = read('schemas/fixtures/notes-v1.json');
+assert(notes.schema_version === 1, 'unknown notes schema version');
+assert(Array.isArray(notes.notes) && notes.notes.length > 0, 'notes fixture is empty');
+let previousNote = 0;
+for (const note of notes.notes) {
+  assert(typeof note.text === 'string' && note.text.length > 0, 'note has no text');
+  // Millisecond precision is the point of this file. A note is only as accurate
+  // as the anchor it is subtracted from, so a formatter that quietly dropped
+  // fractional seconds would cost up to a second of placement against the
+  // transcript without failing anything else.
+  assert(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}(Z|[+-]\d{2}:\d{2})$/.test(note.at),
+    `note timestamp ${note.at} is not ISO 8601 with milliseconds`);
+  const at = Date.parse(note.at);
+  assert(Number.isFinite(at), `note timestamp ${note.at} does not parse`);
+  assert(at >= previousNote, 'notes are not in chronological order');
+  previousNote = at;
+}
+
 const registry = read('models/registry.json');
 assert(registry.registry_version === 1, 'unknown model registry version');
 const ids = new Set();
@@ -54,4 +72,4 @@ assert(corpus.items.every(item => ['draft', 'corrected'].includes(item.reference
 assert(candidate.run_version === 1 && candidate.items.length === corpus.items.length, 'score-run fixture is invalid');
 assert(candidate.items.every(item => corpus.items.some(source => source.id === item.id)), 'score run has an unknown item');
 
-console.log(`verified ${registry.models.length} pinned models, shared transcript fixture, and score fixtures`);
+console.log(`verified ${registry.models.length} pinned models, shared transcript fixture, notes fixture, and score fixtures`);

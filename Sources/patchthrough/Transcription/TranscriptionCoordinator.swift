@@ -104,16 +104,24 @@ actor TranscriptionCoordinator {
     private func drain() async {
         while !queue.isEmpty {
             let dir = queue.removeFirst()
+            // A session the user moved to the Trash while it sat in the queue is
+            // a cancellation, not a failure. Reporting one would raise a banner
+            // telling them to read a transcribe.log inside the folder they just
+            // deleted, and would leave the menu bar stuck on "failed".
+            guard FileManager.default.fileExists(atPath: dir.path) else { continue }
             publish(.transcribing(session: dir.lastPathComponent, queued: queue.count))
             do {
                 try await transcribe(dir)
-                notifyUser(title: "Patchthrough: transcript ready", body: dir.lastPathComponent)
+                notifyUser(title: "Patchthrough: Transcript ready", body: dir.lastPathComponent)
                 runHook(for: dir)
             } catch {
+                // Same reasoning, for a delete that landed mid-transcription.
+                // Narrower window, identical conclusion.
+                guard FileManager.default.fileExists(atPath: dir.path) else { continue }
                 log(dir, "transcription failed: \(error)")
                 lastFailure = dir.lastPathComponent
                 notifyUser(
-                    title: "Patchthrough: transcription failed",
+                    title: "Patchthrough: Transcription failed",
                     body: "\(dir.lastPathComponent). See transcribe.log"
                 )
             }
@@ -485,18 +493,10 @@ private struct Transcript: Encodable {
     private func rendered(title: String) -> String {
         var lines = ["# \(title)", "", "engine: \(engine) (\(model))", ""]
         for seg in segments {
-            lines.append("**[\(Self.clock(seg.start_ms))] \(seg.speaker):** \(seg.text)")
+            lines.append("**[\(TranscriptClock.label(seg.start_ms))] \(seg.speaker):** \(seg.text)")
             lines.append("")
         }
         return lines.joined(separator: "\n")
-    }
-
-    private static func clock(_ ms: Int) -> String {
-        let total = ms / 1000
-        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
-        return h > 0
-            ? String(format: "%d:%02d:%02d", h, m, s)
-            : String(format: "%d:%02d", m, s)
     }
 }
 

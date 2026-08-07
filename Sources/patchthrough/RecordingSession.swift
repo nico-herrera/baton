@@ -57,6 +57,20 @@ final class RecordingSession {
         writeMeta(ended: Date())
     }
 
+    /// `audio_start` needs sub-second resolution: it is the zero point notes are
+    /// measured against, and a note is only as accurate as the anchor it is
+    /// subtracted from. `started` and `ended` stay on the plain second-precision
+    /// formatter because three implementations already parse them.
+    ///
+    /// A fresh instance per call rather than a shared one: `ISO8601DateFormatter`
+    /// is not `Sendable`, and this runs at most three times per recording.
+    /// `SessionNotes` parses with the same options; the two must agree.
+    static func isoMillisFormatter() -> ISO8601DateFormatter {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }
+
     /// Serialize meta.json. `ended == nil` means the session is still live, so
     /// the file is a crash-recovery marker rather than a completion record.
     private func writeMeta(ended: Date?) {
@@ -75,6 +89,19 @@ final class RecordingSession {
                 "mic": Int(micStart.timeIntervalSince(earliest) * 1000),
                 "system": Int(systemStart.timeIntervalSince(earliest) * 1000),
             ],
+            // `earliest` is what every transcript timestamp is measured from,
+            // and until now it was computed here and thrown away. Without it on
+            // disk nothing can convert a wall-clock instant into transcript
+            // time, because `started` is stamped before the audio devices are
+            // even touched — process tap, aggregate device, AudioDeviceStart and
+            // the first callback all land after it. Notes anchor to this key, so
+            // they share the transcript's zero rather than the ticker's.
+            //
+            // Write it even when it degenerates to `startedAt` (a track that
+            // never delivered a buffer). Being consistent with the transcript
+            // matters more than being right in the absolute: both are wrong by
+            // the same amount, so a note still points at the correct line.
+            "audio_start": Self.isoMillisFormatter().string(from: earliest),
             "clean_stop": ended != nil,
         ]
         let end = ended ?? Date()
