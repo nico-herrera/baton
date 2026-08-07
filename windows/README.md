@@ -196,7 +196,14 @@ meeting ends the capture. Handle it, or say so in the doctor check.
 
 ## Shared prose
 
-The handoff prompts exist twice today, in `Sources/patchthrough/Handoff.swift`
-and in `cli/src/patchthrough.js`. Both files carry a comment that says to keep
-them in step. A Windows recorder that grows handoffs makes a third copy. Update
-all three comments when that happens.
+The handoff prompts exist three times, in `Sources/patchthrough/Handoff.swift`,
+in `cli/src/patchthrough.js`, and in
+`windows/src/Patchthrough.Core/HandoffDocument.cs`. All three carry a comment
+that says to keep them in step.
+
+One section is deliberately not in all three. The `## Notes` section exists in
+the Swift app and the CLI only, because notes are written by the macOS recorder
+and a Windows-recorded session has none to render. That is a gap in what the
+Windows recorder *produces*, not a divergence in the format — when it grows a
+notes surface, `HandoffDocument.Build` needs the section and the clock helper
+alongside it.

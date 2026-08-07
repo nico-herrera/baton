@@ -445,8 +445,9 @@ enum Handoff {
     /// Prompt the chat deeplink prefills in the composer. The transcript
     /// arrives separately, as an attached handoff.md.
     /// One wording of the speech-to-text caveat. Every prompt includes it, so
-    /// a change lands in all of them instead of drifting per prompt. The CLI
-    /// in `cli/` carries the same sentence; keep the two in step.
+    /// a change lands in all of them instead of drifting per prompt. The CLI in
+    /// `cli/` and the Windows recorder in `windows/src/Patchthrough.Core/`
+    /// carry the same sentence; keep the three in step.
     static let asrCaveat = """
     It's speech-to-text, so it's messy: unreliable punctuation, garbled \
     technical terms, and 'me'/'them' labels that can be wrong. Read for \
@@ -488,8 +489,21 @@ enum Handoff {
     /// Instructions that travel inside every handoff document. Keeping them
     /// with the transcript means attachments, dragged files, folder handoffs,
     /// and clipboard handoffs all tell the receiving agent what to do.
-    static func taskInstructions(for session: Session) -> String {
-        """
+    ///
+    /// `hasNotes` adds the one clause that only makes sense when a Notes section
+    /// is actually present. A document with no notes must not mention them: an
+    /// instruction to weigh something that is not there reads as a missing
+    /// attachment and invites the agent to ask for it.
+    static func taskInstructions(for session: Session, hasNotes: Bool = false) -> String {
+        let notesRule = hasNotes ? """
+
+
+        My own notes are above the transcript. They are what I thought mattered \
+        while it was happening, so use them to decide what to lead with. Where a \
+        note and the transcript disagree, the transcript is what was said. \
+        Prioritize by the notes, but do not override the record with them.
+        """ : ""
+        return """
         Read the transcript below and work out what this meeting asks of me. \
         Before changing anything, give me:
 
@@ -498,7 +512,7 @@ enum Handoff {
         3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
         4. Anything discussed that the current project may already do or contradict.
 
-        \(asrCaveat) Don't edit anything until we've agreed the list.
+        \(asrCaveat) Don't edit anything until we've agreed the list.\(notesRule)
         """
     }
 
@@ -664,12 +678,13 @@ enum Handoff {
             .joined(separator: "\n")
 
         let truncationNote = session.cleanStop ? "" : " (recording ended uncleanly, so the transcript may be truncated)"
+        let notes = SessionNotes.resolved(in: session.dir)
         return """
         # Meeting handoff: \(session.displayName)
 
         ## Instructions
 
-        \(taskInstructions(for: session))
+        \(taskInstructions(for: session, hasNotes: !notes.isEmpty))
 
         ## Recording
 
@@ -681,10 +696,40 @@ enum Handoff {
         proper nouns, identifiers and technical terms. If a term looks wrong but is \
         phonetically close to something plausible, it probably is that.
         - Source: `\(session.dir.path)`
-
+        \(notesSection(notes))
         ## Transcript
 
         \(body)
+        """
+    }
+
+    /// The user's own notes, above the transcript because that is the order a
+    /// reader needs them in: what a human flagged, then the record it points at.
+    ///
+    /// Absent notes produce no heading and no blank line — the whole section
+    /// vanishes. An empty "## Notes" would
+    /// read as "the user wrote nothing worth saying" rather than "this session
+    /// predates the feature", and those are different claims.
+    ///
+    /// The leading newline lives inside the returned string so the empty case
+    /// collapses cleanly against the blank line already in the template.
+    private static func notesSection(_ notes: [SessionNotes.Resolved]) -> String {
+        guard !notes.isEmpty else { return "" }
+        let lines = notes.map { note in
+            // An unanchored note keeps its text and loses its timestamp. Better
+            // a note with no position than a note pointing at the wrong line.
+            guard let ms = note.offsetMs else { return "- \(note.text)" }
+            return "- **[\(TranscriptClock.label(ms))]** \(note.text)"
+        }
+        return """
+
+        ## Notes
+
+        What I typed while this was happening, in my own words. Nothing here was \
+        generated or summarized. The timestamps point into the transcript below.
+
+        \(lines.joined(separator: "\n"))
+
         """
     }
 

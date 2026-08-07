@@ -136,3 +136,98 @@ test('published executable stages a file without running an agent', (t) => {
     /command-line client into its own package boundary/,
   );
 });
+
+test('notes ride into the fallback handoff on the transcript clock', (t) => {
+  const root = temporaryDirectory(t);
+  const dir = writeSession(root, '2026.08.06-1500');
+  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({
+    duration_seconds: 600,
+    clean_stop: true,
+    started: '2026-08-06T14:59:58Z',
+    audio_start: '2026-08-06T15:00:00.000Z',
+  }));
+  fs.writeFileSync(path.join(dir, 'notes.json'), JSON.stringify({
+    schema_version: 1,
+    notes: [
+      { at: '2026-08-06T15:02:14.500Z', text: 'installer before the recorder' },
+      { at: '2026-08-06T15:00:01.000Z', text: 'he sounds annoyed about the delay' },
+    ],
+  }));
+
+  const session = resolveSession(root);
+  // Ordered by position in the recording, not by the order they were typed,
+  // and measured from audio_start rather than the two-seconds-earlier `started`.
+  assert.match(session.document, /^- \*\*\[0:01\]\*\* he sounds annoyed about the delay$/m);
+  assert.match(session.document, /^- \*\*\[2:14\]\*\* installer before the recorder$/m);
+  assert.ok(session.document.indexOf('## Notes') < session.document.indexOf('## Transcript'));
+  assert.match(session.document, /Prioritize by the notes/);
+});
+
+test('a session with no notes renders no notes section at all', (t) => {
+  const root = temporaryDirectory(t);
+  writeSession(root, '2026.08.06-1500');
+
+  // Absent produces no heading, no blank line, and no mention in the
+  // instructions. An empty section would claim the user wrote nothing worth
+  // saying rather than that the session predates the feature.
+  const session = resolveSession(root);
+  assert.doesNotMatch(session.document, /## Notes/);
+  assert.doesNotMatch(session.document, /notes/);
+  assert.match(session.document, /- Source: `[^`]+`\n\n## Transcript/);
+});
+
+test('notes fall back to the session start when audio_start predates the key', (t) => {
+  const root = temporaryDirectory(t);
+  const dir = writeSession(root, '2026.08.06-1500');
+  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({
+    duration_seconds: 600,
+    clean_stop: true,
+    started: '2026-08-06T15:00:00Z',
+  }));
+  fs.writeFileSync(path.join(dir, 'notes.json'), JSON.stringify({
+    schema_version: 1,
+    notes: [{ at: '2026-08-06T15:00:10.000Z', text: 'older session' }],
+  }));
+
+  assert.match(resolveSession(root).document, /^- \*\*\[0:10\]\*\* older session$/m);
+});
+
+test('a note typed before the first audio buffer clamps to the start', (t) => {
+  const root = temporaryDirectory(t);
+  const dir = writeSession(root, '2026.08.06-1500');
+  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({
+    duration_seconds: 600,
+    clean_stop: true,
+    audio_start: '2026-08-06T15:00:00.000Z',
+  }));
+  fs.writeFileSync(path.join(dir, 'notes.json'), JSON.stringify({
+    schema_version: 1,
+    notes: [{ at: '2026-08-06T14:59:55.000Z', text: 'typed while the tap was opening' }],
+  }));
+
+  assert.match(resolveSession(root).document, /^- \*\*\[0:00\]\*\* typed while the tap was opening$/m);
+});
+
+test('a truncated notes file loses the notes, never the handoff', (t) => {
+  const root = temporaryDirectory(t);
+  const dir = writeSession(root, '2026.08.06-1500');
+  fs.writeFileSync(path.join(dir, 'notes.json'), '{ this is not json');
+
+  const session = resolveSession(root);
+  assert.doesNotMatch(session.document, /## Notes/);
+  assert.match(session.document, /^# Meeting handoff/m);
+});
+
+test('the app-authored handoff still wins over a rebuild when notes exist', (t) => {
+  const root = temporaryDirectory(t);
+  const dir = writeSession(root, '2026.08.06-1500');
+  fs.writeFileSync(path.join(dir, 'notes.json'), JSON.stringify({
+    schema_version: 1,
+    notes: [{ at: '2026-08-06T15:00:01.000Z', text: 'should not appear' }],
+  }));
+  fs.writeFileSync(path.join(dir, 'handoff.md'), '# canonical handoff\n');
+
+  // The recorder's document is the contract. Notes are baked in at generation
+  // time, so the CLI must not append them during staging.
+  assert.equal(resolveSession(root).document, '# canonical handoff\n');
+});
