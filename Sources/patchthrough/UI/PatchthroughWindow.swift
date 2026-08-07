@@ -18,8 +18,23 @@ final class SessionStore: ObservableObject {
         let cleanStop: Bool
         /// What the user named this meeting, from `meta.json`.
         let title: String?
+        /// What the user typed while this was recording, already placed on the
+        /// transcript's clock. Empty for most sessions.
+        let notes: [SessionNotes.Resolved]
 
-        enum Status { case ready, pending, broken }
+        /// `recording` is the session being captured right now. Before it
+        /// existed the live folder fell through to `pending`, so a meeting still
+        /// in progress told the user it was "transcribing…", describing work
+        /// that cannot start until the recording it is describing has stopped.
+        ///
+        /// `empty` is a recording that transcribed fine and contained no speech:
+        /// a muted mic, the wrong input device, a call nobody spoke on. It also
+        /// used to fall through to `pending`, because the only question asked
+        /// was whether the session resolved, and an empty one never does. So a
+        /// finished session sat on "Transcribing…" indefinitely with nothing
+        /// running behind it. `transcript.json` is the completion marker, so its
+        /// presence is what tells the two apart.
+        enum Status { case recording, ready, pending, empty, broken }
 
         /// The row's second line: the first thing said. A name never replaces
         /// it, because the name says what the meeting was and this says how it
@@ -28,16 +43,20 @@ final class SessionStore: ObservableObject {
 
         var statusSymbol: String {
             switch status {
-            case .ready:   return cleanStop ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
-            case .pending: return "clock.arrow.circlepath"
-            case .broken:  return "exclamationmark.triangle.fill"
+            case .recording: return "record.circle"
+            case .ready:     return cleanStop ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
+            case .pending:   return "clock.arrow.circlepath"
+            case .empty:     return "waveform.slash"
+            case .broken:    return "exclamationmark.triangle.fill"
             }
         }
         var subtitle: String {
             switch status {
-            case .ready:   return "\(duration) · \(words) words" + (cleanStop ? "" : " · truncated")
-            case .pending: return "transcribing…"
-            case .broken:  return "interrupted: no meta.json"
+            case .recording: return notes.isEmpty ? "Recording" : "Recording · \(notes.count) note\(notes.count == 1 ? "" : "s")"
+            case .ready:     return "\(duration) · \(words) words" + (cleanStop ? "" : " · truncated")
+            case .pending:   return "Transcribing…"
+            case .empty:     return "No speech found"
+            case .broken:    return "Interrupted: no meta.json"
             }
         }
     }
@@ -96,6 +115,11 @@ final class SessionStore: ObservableObject {
     @Published var selection: String?
     @Published var isRecording = false
     @Published var elapsed = ""
+    /// The folder name of the session being captured right now, so `refresh()`
+    /// can tell a live recording apart from one waiting to be transcribed. Both
+    /// look identical on disk — meta.json present, transcript.md absent — and
+    /// only the controller knows which is which.
+    @Published private(set) var liveSessionID: String?
     @Published var lastAction: String?
     @Published var search = ""
     @Published var showSettings = false
@@ -212,20 +236,97 @@ final class SessionStore: ObservableObject {
             let name = dir.lastPathComponent
             let stamp = name.split(separator: "-").prefix(2).joined(separator: "-")
             let date = Self.folderFormat.date(from: stamp)
+            let notes = SessionNotes.resolved(in: dir)
 
+            // The live session is checked first. It has meta.json and no
+            // transcript, which is indistinguishable on disk from a session
+            // queued for transcription.
+            if name == liveSessionID {
+                return Item(id: name, dir: dir, date: date, duration: "", words: 0, segments: [],
+                            status: .recording, cleanStop: true,
+                            title: Self.storedTitle(dir), notes: notes)
+            }
             if let sess = try? Handoff.resolveSession(named: name, root: root) {
                 return Item(id: name, dir: dir, date: date, duration: sess.duration,
                             words: sess.words, segments: Self.parseSegments(dir),
-                            status: .ready, cleanStop: sess.cleanStop, title: sess.title)
+                            status: .ready, cleanStop: sess.cleanStop,
+                            title: sess.title, notes: notes)
             }
+            // transcript.json is the completion marker. Present, but the session
+            // still would not resolve, means transcription ran and found no
+            // speech to write. That is finished work, not work in progress, and
+            // calling it pending left it reading "Transcribing…" forever with
+            // nothing behind it.
+            let hasTranscript = fm.fileExists(atPath: dir.appendingPathComponent("transcript.json").path)
             let hasMeta = fm.fileExists(atPath: dir.appendingPathComponent("meta.json").path)
+            let status: Item.Status = hasTranscript ? .empty : (hasMeta ? .pending : .broken)
             return Item(id: name, dir: dir, date: date, duration: "", words: 0, segments: [],
-                        status: hasMeta ? .pending : .broken, cleanStop: true,
-                        title: Self.storedTitle(dir))
+                        status: status, cleanStop: true,
+                        title: Self.storedTitle(dir), notes: notes)
         }
 
         if selection == nil || !items.contains(where: { $0.id == selection }) {
             selection = items.first(where: { $0.status == .ready })?.id
+        }
+    }
+
+    /// Point the window at the session being captured, and select it so the
+    /// notes surface is already in front of the user when the meeting starts.
+    /// Nil ends the recording state.
+    func setLiveSession(_ id: String?) {
+        liveSessionID = id
+        refresh()
+        if let id { selection = id }
+    }
+
+    /// Move a session to the Trash, after asking.
+    ///
+    /// The Trash rather than `removeItem`: a meeting cannot be recorded again,
+    /// and macOS already has the place users look for things they deleted by
+    /// mistake. Emptying it stays their decision, made somewhere they expect to
+    /// make it.
+    ///
+    /// A live recording is refused outright. `RecordingSession` is writing into
+    /// that folder and holds open file handles for both tracks; pulling it out
+    /// from under the recorder would leave a half-finalized session and lose
+    /// audio the user is still capturing. The context menu hides the item too —
+    /// this guard is for anything that reaches the method another way.
+    func moveToTrash(_ item: Item) {
+        guard item.status != .recording else { return }
+        guard SessionAlert.confirmTrash(
+            name: item.title ?? item.id,
+            hasTranscript: item.status == .ready,
+            noteCount: item.notes.count
+        ) else { return }
+
+        do {
+            try FileManager.default.trashItem(at: item.dir, resultingItemURL: nil)
+            // refresh() re-selects the first ready session when the current
+            // selection stops existing, so the detail pane never points at a
+            // folder that is gone.
+            refresh()
+            lastAction = "Moved \(item.title ?? item.id) to the Trash"
+        } catch {
+            SessionAlert.trashFailed(name: item.title ?? item.id, error: error)
+        }
+    }
+
+    /// Commit one note to the selected session, stamped now.
+    ///
+    /// Written straight from here, the way `rename` writes meta.json. Safe
+    /// against `RecordingSession`'s single-writer rule for a live session
+    /// because that rule is about meta.json specifically — `writeMeta` rebuilds
+    /// that file from scratch and would erase an outside key. It never touches
+    /// notes.json, and both writers are on the main actor.
+    func appendNote(_ text: String) {
+        guard let item = selected else { return }
+        do {
+            try SessionNotes.append(text, to: item.dir)
+            refresh()
+        } catch {
+            // The note is still in the field, so the user can retry or copy it
+            // out. Losing it silently would be the worse failure.
+            lastAction = "Couldn't save the note: \(error.localizedDescription)"
         }
     }
 
@@ -249,7 +350,7 @@ final class SessionStore: ObservableObject {
             let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             lastAction = trimmed.isEmpty ? "name cleared" : "renamed to \"\(trimmed)\""
         } catch {
-            lastAction = "couldn't rename: \(error.localizedDescription)"
+            lastAction = "Couldn't rename: \(error.localizedDescription)"
         }
     }
 
@@ -296,7 +397,7 @@ final class SessionStore: ObservableObject {
 
     func send(_ item: Item, to dest: Destination) {
         guard let sess = try? Handoff.resolveSession(named: item.id, root: root) else {
-            lastAction = "couldn't load \(item.id)"
+            lastAction = "Couldn't load \(item.id)"
             return
         }
 
@@ -311,7 +412,7 @@ final class SessionStore: ObservableObject {
             guard let match = Handoff.installedAgents().first(where: { $0.agent.name == name }),
                   let repo else { return }
             do { try Handoff.stage(session: sess, inRepo: repo) } catch {
-                lastAction = "staging failed: \(error)"
+                lastAction = "Staging failed: \(error)"
                 return
             }
             Handoff.launchInTerminal(
@@ -320,7 +421,7 @@ final class SessionStore: ObservableObject {
                 prompt: Handoff.prompt(for: sess),
                 cwd: repo
             )
-            lastAction = "patched through to \(name) in \(repo.lastPathComponent)"
+            lastAction = "Patched through to \(name) in \(repo.lastPathComponent)"
         } else {
             let id = String(dest.id.dropFirst(4))
             guard let target = Handoff.installedGuiTargets().first(where: { $0.id == id }) else { return }
@@ -328,18 +429,18 @@ final class SessionStore: ObservableObject {
             // the one manual step is clear before the app takes focus.
             if case .appClipboard(let appName) = target.kind, target.manualTextPaste,
                !HandoffAlert.confirmManualPaste(app: appName) {
-                lastAction = "handoff to \(dest.shortLabel) cancelled"
+                lastAction = "Handoff to \(dest.shortLabel) cancelled"
                 return
             }
             // A site that copies the attachment into cloud storage breaks the
             // on-device promise, so the user agrees before the file moves.
             if case .webChat(let site) = target.kind, site.uploadsToCloud,
                !HandoffAlert.confirmCloudUpload(site: dest.shortLabel) {
-                lastAction = "handoff to \(dest.shortLabel) cancelled"
+                lastAction = "Handoff to \(dest.shortLabel) cancelled"
                 return
             }
             guard Handoff.launchGui(target: target, session: sess, repo: repo) else {
-                lastAction = "couldn't open \(dest.shortLabel)"
+                lastAction = "Couldn't open \(dest.shortLabel)"
                 return
             }
             switch target.kind {
@@ -360,7 +461,7 @@ final class SessionStore: ObservableObject {
                     lastAction = "Claude opened a new chat. The handoff file is on your clipboard (⌘V attaches it)"
                 }
             case .claudeCode:
-                lastAction = "new Claude Code session in \(repo?.lastPathComponent ?? "?") (transcript staged)"
+                lastAction = "New Claude Code session in \(repo?.lastPathComponent ?? "?") (transcript staged)"
             case .webChat:
                 // The browser needs longer than an app to be ready for a
                 // paste: it has to load the page first.
@@ -371,7 +472,7 @@ final class SessionStore: ObservableObject {
                     lastAction = "\(dest.shortLabel) opened. The handoff file is on your clipboard (⌘V attaches it)"
                 }
             default:
-                lastAction = "patched through to \(dest.shortLabel) in \(repo?.lastPathComponent ?? "?")"
+                lastAction = "Patched through to \(dest.shortLabel) in \(repo?.lastPathComponent ?? "?")"
             }
         }
         DestinationRanking.record(dest.id)
@@ -406,7 +507,7 @@ final class SessionStore: ObservableObject {
     func copyTranscript(_ item: Item) {
         guard let sess = try? Handoff.resolveSession(named: item.id, root: root) else { return }
         Handoff.pbcopy(Handoff.handoffDocument(for: sess))
-        lastAction = "transcript copied to the clipboard"
+        lastAction = "Transcript copied to the clipboard"
     }
 
     private func resolveRepo() -> URL? {
@@ -444,6 +545,9 @@ struct PatchthroughRootView: View {
     @State private var renamingID: String?
     @State private var renameText = ""
     @FocusState private var renameFocused: Bool
+    @State private var noteDraft = ""
+    @FocusState private var noteFocused: Bool
+    @State private var recordHovered = false
     @State private var showDestinationMenu = false
     /// The hover/keyboard highlight in the destination menu. It persists when
     /// the pointer leaves a row: falling back to the default highlight made
@@ -549,11 +653,35 @@ struct PatchthroughRootView: View {
                         Text(store.elapsed).font(PT.F.monoSmall)
                     }
                 }
-                .foregroundStyle(store.isRecording ? PT.C.signal : PT.C.text3)
+                // Hover previews what the click does, so the two states invert.
+                // Idle goes red, because pressing it starts a recording — rule
+                // 2's own meaning for the colour. Recording goes grey, because
+                // pressing it ends one, and staying red would preview nothing.
+                //
+                // The hover red is `signalLit`, not `signal`: rule 2 reserves
+                // the fill colour for fills and says icons use the lit one. It
+                // also lands brighter than the recording state's `signal`, so a
+                // hint and a live recording never read as the same thing.
+                .foregroundStyle(
+                    store.isRecording
+                        ? (recordHovered ? PT.C.text2 : PT.C.signal)
+                        : (recordHovered ? PT.C.signalLit : PT.C.text3)
+                )
                 .frame(height: 24)
                 .padding(.horizontal, 6)
+                // The same ground the destination menu rows use for hover. It
+                // carries the hit area; the colour above carries the meaning.
+                .background(
+                    recordHovered ? PT.C.raised : Color.clear,
+                    in: RoundedRectangle(cornerRadius: PT.M.controlRadius)
+                )
             }
             .buttonStyle(.plain)
+            // Without this the hit area is the glyph's own bounds, so the
+            // padded corners of the ground would highlight without being
+            // clickable.
+            .contentShape(RoundedRectangle(cornerRadius: PT.M.controlRadius))
+            .onHover { recordHovered = $0 }
             .help(store.isRecording ? "Stop recording" : "Start recording")
             .keyboardShortcut("r", modifiers: [.command, .shift])
 
@@ -835,6 +963,15 @@ struct PatchthroughRootView: View {
                                     Button("Show in Finder") {
                                         NSWorkspace.shared.activateFileViewerSelecting([item.dir])
                                     }
+                                    // Absent while recording: the recorder holds
+                                    // both track files open and is still writing
+                                    // the meeting the user would be deleting.
+                                    if item.status != .recording {
+                                        Divider()
+                                        Button("Move to Trash", role: .destructive) {
+                                            store.moveToTrash(item)
+                                        }
+                                    }
                                 }
                         }
                     }
@@ -958,10 +1095,15 @@ struct PatchthroughRootView: View {
                     }
                 }
             } else {
-                // Pending/broken keep their status glyph and subtitle.
+                // Recording/pending/broken keep their status glyph and subtitle.
                 HStack(spacing: 8) {
                     Image(systemName: item.statusSymbol)
-                        .foregroundStyle(item.status == .broken ? PT.C.signalLit : PT.C.text3)
+                        // Red on the live row is rule 2's sanctioned use, not a
+                        // second accent: this row *is* the recording.
+                        .foregroundStyle(
+                            item.status == .broken || item.status == .recording
+                                ? PT.C.signalLit : PT.C.text3
+                        )
                         .font(PT.F.iconSmall)
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(alignment: .firstTextBaseline, spacing: 7) {
@@ -1028,10 +1170,16 @@ struct PatchthroughRootView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if let item = store.selected, item.status == .ready {
+        if let item = store.selected, item.status == .recording {
+            recordingPane(item)
+        } else if let item = store.selected, item.status == .ready {
             VStack(spacing: 0) {
                 detailHeader(item)
                 Divider().overlay(PT.C.hairline)
+                if !item.notes.isEmpty {
+                    notesStrip(item)
+                    Divider().overlay(PT.C.hairline)
+                }
                 transcriptView(item)
                 if let action = store.lastAction {
                     Divider().overlay(PT.C.hairline)
@@ -1046,6 +1194,12 @@ struct PatchthroughRootView: View {
             placeholder(symbol: "clock.arrow.circlepath",
                         title: "Transcribing \(item.id)",
                         detail: "About 20 seconds per hour of audio. The list updates when it lands.")
+        } else if let item = store.selected, item.status == .empty {
+            placeholder(symbol: "waveform.slash",
+                        title: "No speech in \(item.title ?? item.id)",
+                        detail: item.notes.isEmpty
+                            ? "Transcription finished and found nothing to write. Usually a muted mic or the wrong input device. The audio is still in the session folder, so check it before deleting."
+                            : "Transcription finished and found nothing to write, but your \(item.notes.count) note\(item.notes.count == 1 ? "" : "s") did save. There is no transcript to patch through, so copy anything you need out of the session folder.")
         } else if let item = store.selected, item.status == .broken {
             placeholder(symbol: "exclamationmark.triangle",
                         title: "\(item.id) was interrupted",
@@ -1057,6 +1211,145 @@ struct PatchthroughRootView: View {
                             ? "Start a recording from the menu bar. Your mic and everything your Mac plays are captured as two tracks, then transcribed on-device."
                             : "Pick a session on the left.")
         }
+    }
+
+    // MARK: Notes
+
+    /// What the user is typing while the meeting runs. There is no transcript
+    /// to show yet, so the notes are the whole pane.
+    ///
+    /// The list is above the field rather than below it because the field is
+    /// where the eye already is, and a meeting does not wait for you to scroll.
+    private func recordingPane(_ item: SessionStore.Item) -> some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(item.title ?? item.id)
+                    .font(PT.F.settingRow)
+                    .foregroundStyle(PT.C.text)
+                Text("Recording · \(store.elapsed)")
+                    .font(PT.F.caption)
+                    .foregroundStyle(PT.C.signalLit)
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .frame(height: PT.M.titleBarHeight)
+
+            Divider().overlay(PT.C.hairline)
+
+            if item.notes.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "square.and.pencil")
+                        .font(PT.F.placeholder)
+                        .foregroundStyle(PT.C.text4)
+                    Text("Take notes as you go")
+                        .font(.title3)
+                        .foregroundStyle(PT.C.text)
+                    Text("Whatever you type is stamped against the recording and lands above the transcript in the handoff. Your words are kept verbatim. Nothing summarizes them.")
+                        .font(.callout)
+                        .foregroundStyle(PT.C.text3)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 380)
+                    // Only on the empty state, so it is there the first time
+                    // somebody records and gone the moment they start typing.
+                    // A hint that outlives its usefulness becomes furniture.
+                    Text("This window opens itself when you record. Turn that off in Settings.")
+                        .font(PT.F.caption)
+                        .foregroundStyle(PT.C.text4)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 2)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                notesList(item)
+            }
+
+            Divider().overlay(PT.C.hairline)
+            noteField
+        }
+        .background(PT.C.window)
+    }
+
+    /// The committed notes, newest last so the list reads in meeting order.
+    private func notesList(_ item: SessionStore.Item) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(item.notes.enumerated()), id: \.offset) { index, note in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            // An unanchored note shows no time rather than a
+                            // wrong one. Same rule the handoff document follows.
+                            // Blank rather than a dash: the column is data, and
+                            // a placeholder glyph reads as a value that is not
+                            // there to read.
+                            Text(note.offsetMs.map(TranscriptClock.label) ?? "")
+                                .font(PT.F.monoSmall)
+                                .foregroundStyle(PT.C.text4)
+                                .frame(width: 46, alignment: .trailing)
+                            Text(note.text)
+                                .font(PT.F.transcript)
+                                .foregroundStyle(PT.C.text2)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .id(index)
+                    }
+                }
+                .padding(PT.M.transcriptPad)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .onChange(of: item.notes.count) { _, count in
+                proxy.scrollTo(count - 1)
+            }
+        }
+    }
+
+    /// Commit on Return. No Save button: a note you have to reach for is a note
+    /// you do not take while somebody is still talking.
+    private var noteField: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "square.and.pencil")
+                .font(PT.F.icon)
+                .foregroundStyle(PT.C.text4)
+            TextField("", text: $noteDraft,
+                      prompt: Text("Note this moment").foregroundColor(PT.C.text4))
+                .textFieldStyle(.plain)
+                .font(PT.F.transcript)
+                .foregroundStyle(PT.C.text)
+                .focused($noteFocused)
+                .onSubmit(commitNote)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background(PT.C.raised, in: RoundedRectangle(cornerRadius: PT.M.fieldRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: PT.M.fieldRadius)
+                .strokeBorder(PT.C.border2, lineWidth: 1)
+        )
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private func commitNote() {
+        store.appendNote(noteDraft)
+        noteDraft = ""
+        // Stay focused: notes come in bursts, and re-clicking the field between
+        // them costs the next thing that gets said.
+        noteFocused = true
+    }
+
+    /// Notes on a session that has already been transcribed, above the
+    /// transcript because that is the order a reader needs them in.
+    ///
+    /// Only rendered when notes exist. An always-present empty strip would eat
+    /// the transcript's vertical space on every session that never had any.
+    private func notesStrip(_ item: SessionStore.Item) -> some View {
+        VStack(spacing: 0) {
+            notesList(item)
+                .frame(maxHeight: 132)
+            Divider().overlay(PT.C.hairline)
+            noteField
+        }
+        .background(PT.C.sunken)
     }
 
     private func placeholder(symbol: String, title: String, detail: String) -> some View {
@@ -1201,6 +1494,7 @@ struct SettingsView: View {
     @State private var autoPaste = false
     @State private var launchAtLogin = false
     @State private var onStop = ""
+    @State private var openWindowOnRecord = true
     @State private var terminalID = TerminalApp.known[0].id
     @State private var customDestinations: [CustomDraft] = []
     @State private var error: String?
@@ -1271,6 +1565,18 @@ struct SettingsView: View {
                                   isOn: $voiceProcessing)
                     }
                 }
+
+                section("Notes") {
+                    card {
+                        toggleRow("Open the window when recording starts",
+                                  subtitle: "The notes field is in the window, not the menu bar",
+                                  isOn: $openWindowOnRecord)
+                    }
+                    caption("Notes go into the handoff above the transcript, in your own "
+                            + "words. Nothing summarizes them, and the transcript stays "
+                            + "verbatim.")
+                }
+
 
                 section("Patch through") {
                     card {
@@ -1614,6 +1920,7 @@ struct SettingsView: View {
         autoPaste = Config.autoPaste()
         launchAtLogin = LaunchAtLogin.isEnabled
         onStop = Config.onStop() ?? ""
+        openWindowOnRecord = Config.notesOpenWindowOnRecord()
         terminalID = TerminalApp.current().id
         customDestinations = Config.customDestinations().map {
             CustomDraft(configID: $0.id, label: $0.label,
@@ -1694,6 +2001,7 @@ struct SettingsView: View {
                 "mic_voice_processing": voiceProcessing ? true : nil,
                 "auto_paste": autoPaste ? nil : false,
                 "on_stop": trimmedHook.isEmpty ? nil : trimmedHook,
+                "notes.open_window_on_record": openWindowOnRecord ? nil : false,
                 // Only written when it isn't the default, so the config keeps
                 // holding deliberate overrides only.
                 "terminal": terminalID == TerminalApp.known[0].id ? nil : terminalID,
@@ -1705,7 +2013,7 @@ struct SettingsView: View {
             // The menus read destinations once per refresh, so a saved
             // destination has to trigger one or it appears only on the next.
             store.refresh()
-            store.lastAction = "settings saved"
+            store.lastAction = "Settings saved"
             dismiss()
         } catch {
             self.error = "Couldn't write the config: \(error.localizedDescription)"

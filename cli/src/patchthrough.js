@@ -60,11 +60,20 @@ function formatDuration(seconds) {
 }
 
 // One wording of the speech-to-text caveat, shared by every prompt here. The
-// app carries the same sentence in Handoff.swift (`asrCaveat`). These two
-// strings are the handoff contract in prose: keep them in step.
+// app carries the same sentence in Handoff.swift (`asrCaveat`) and the Windows
+// recorder in windows/src/Patchthrough.Core/HandoffDocument.cs (`AsrCaveat`).
+// These three strings are the handoff contract in prose: keep them in step.
 const ASR_CAVEAT = "It's speech-to-text, so it's messy: unreliable punctuation, garbled technical terms, and 'me'/'them' labels that can be wrong. Read for intent, not literal wording.";
 
-function taskInstructions() {
+// `hasNotes` adds the one clause that only makes sense when a Notes section is
+// actually present. A document with no notes must not mention them: telling an
+// agent to weigh something that is not there reads as a missing attachment.
+function taskInstructions(hasNotes = false) {
+  const notesRule = hasNotes
+    ? `
+
+My own notes are above the transcript. They are what I thought mattered while it was happening, so use them to decide what to lead with. Where a note and the transcript disagree, the transcript is what was said. Prioritize by the notes, but do not override the record with them.`
+    : '';
   return `Read the transcript below and work out what this meeting asks of me. Before changing anything, give me:
 
 1. Concrete work items it implies, ordered by what should happen first.
@@ -72,7 +81,7 @@ function taskInstructions() {
 3. Anything ambiguous or contradictory, and anything that reads like a transcription error. Ask me rather than guess.
 4. Anything discussed that the current project may already do or contradict.
 
-${ASR_CAVEAT} Don't edit anything until we've agreed the list.`;
+${ASR_CAVEAT} Don't edit anything until we've agreed the list.${notesRule}`;
 }
 
 // Prompt for the browser doors. It never names the attached file, because
@@ -100,6 +109,38 @@ function writeHandoffFile(session) {
   return target;
 }
 
+// The one place a millisecond offset becomes a [m:ss] label here. The app
+// carries the same function in TranscriptClock.swift; keep the two in step. A
+// note that says [2:14] is an instruction to go and read the line the
+// transcript labels [2:14], so a renderer that rounded where the other
+// truncated would point at a line that is close but wrong.
+function transcriptClock(ms) {
+  const total = Math.floor(Math.max(0, ms) / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const pad = (n) => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(total % 60)}` : `${m}:${pad(total % 60)}`;
+}
+
+// The user's own notes, above the transcript because that is the order a reader
+// needs them in: what a human flagged, then the record it points at. Absent
+// notes produce no heading and no blank line, the same way the disclosure line
+// vanishes — an empty "## Notes" would claim the user wrote nothing worth
+// saying, rather than that the session predates the file.
+function notesSection(notes) {
+  if (!notes.length) return '';
+  const lines = notes.map((note) => (note.offsetMs === null
+    ? `- ${note.text}`
+    : `- **[${transcriptClock(note.offsetMs)}]** ${note.text}`));
+  return `
+## Notes
+
+What I typed while this was happening, in my own words. Nothing here was generated or summarized. The timestamps point into the transcript below.
+
+${lines.join('\n')}
+`;
+}
+
 function buildHandoffDocument(session) {
   const lines = session.transcript.split(/\r?\n/);
   const firstSegment = lines.findIndex((line) => /^\*\*\[/.test(line));
@@ -107,11 +148,12 @@ function buildHandoffDocument(session) {
   const truncation = session.cleanStop === false
     ? ' (recording ended uncleanly, so the transcript may be truncated)'
     : '';
+  const notes = session.notes ?? [];
   return `# Meeting handoff: ${session.title || session.name}
 
 ## Instructions
 
-${taskInstructions()}
+${taskInstructions(notes.length > 0)}
 
 ## Recording
 
@@ -119,11 +161,50 @@ ${taskInstructions()}
 - Speakers: \`me\` is this machine's microphone. \`them\` is the audio the Mac played, which is the other side of the call. These are channels, not verified identities: echo can put the wrong label on a line.
 - Transcribed on-device. **Expect transcription errors**, especially in proper nouns, identifiers and technical terms. If a term looks wrong but is phonetically close to something plausible, it probably is that.
 - Source: \`${session.sourcePath}\`
-
+${notesSection(notes)}
 ## Transcript
 
 ${body}
 `;
+}
+
+// Notes the user typed while the meeting recorded, from the optional
+// notes.json, placed on the transcript's clock. Absent for most sessions.
+//
+// These are the user's own words. Nothing generates or rewrites them, and
+// nothing here may either — a note stops being evidence of what a human
+// thought mattered the moment it is paraphrased.
+function readNotes(sessionDir, meta) {
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(path.join(sessionDir, 'notes.json'), 'utf8'));
+  } catch {
+    // Absent is the normal state, and a truncated side file must not take the
+    // handoff down with it.
+    return [];
+  }
+  if (!Array.isArray(parsed?.notes)) return [];
+
+  // The transcript's zero is the first audio buffer (`audio_start`), not the
+  // session start — `started` is stamped before the audio devices are opened.
+  // Sessions written before that key existed fall back to it. `started` is the
+  // earlier instant, so those notes overshoot by the device startup latency and
+  // read later than the moment they refer to, which still beats dropping them.
+  const anchor = Date.parse(typeof meta.audio_start === 'string' ? meta.audio_start : meta.started);
+
+  return parsed.notes
+    .filter((note) => note && typeof note.text === 'string' && note.text.length > 0)
+    .map((note) => {
+      const at = Date.parse(note.at);
+      // No usable anchor means no position. Rendering the note at 0:00 would
+      // send a reader to the opening line of a meeting it has nothing to do
+      // with, so it loses its timestamp and keeps its text.
+      if (!Number.isFinite(anchor) || !Number.isFinite(at)) return { offsetMs: null, text: note.text };
+      // Clamp: a note typed before the first buffer arrived belongs at the
+      // start of the transcript, not before it.
+      return { offsetMs: Math.max(0, at - anchor), text: note.text };
+    })
+    .sort((a, b) => (a.offsetMs ?? 0) - (b.offsetMs ?? 0));
 }
 
 function readMeta(sessionDir) {
@@ -160,6 +241,7 @@ function readSession(sessionDir) {
     words: segments.flatMap((line) => spokenText(line).split(/\s+/).filter(Boolean)).length,
     duration: formatDuration(Number(meta.duration_seconds)),
     cleanStop: meta.clean_stop !== false,
+    notes: readNotes(sessionDir, meta),
   };
   const handoffPath = path.join(sessionDir, 'handoff.md');
   session.document = fs.existsSync(handoffPath)

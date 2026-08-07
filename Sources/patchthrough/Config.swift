@@ -74,6 +74,23 @@ enum Config {
         load()?["transcription"] as? [String: Any]
     }
 
+    /// Bring the window up when a recording starts, so the notes field is in
+    /// front of the user without them having to go and find it. Default on.
+    ///
+    /// Recording is still started from the menu bar. This exists because a note
+    /// you have to open a window to write is a note nobody takes while somebody
+    /// is talking, and the window was previously a review-only surface.
+    ///
+    /// Set `"notes": {"open_window_on_record": false}` to keep the window out of
+    /// the way during calls.
+    static func notesOpenWindowOnRecord() -> Bool {
+        notes()?["open_window_on_record"] as? Bool ?? true
+    }
+
+    private static func notes() -> [String: Any]? {
+        load()?["notes"] as? [String: Any]
+    }
+
     /// Apple voice processing (acoustic echo cancellation) on the mic, so
     /// speaker playback doesn't bleed into the mic track and get transcribed
     /// as "me". Default off, because the live voice unit ducks all other

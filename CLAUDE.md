@@ -12,10 +12,20 @@ swift build                                    # debug
 ./packaging/make-app.sh                        # release, sign, install to ~/Applications
 ```
 
-`make-app.sh` also installs, so after it run
-`launchctl kickstart -k gui/$(id -u)/com.nicoherrera.patchthrough` to restart the
-daemon. Preferences live in the `com.nicoherrera.patchthrough` domain — the app is
-not sandboxed, so `defaults read com.nicoherrera.patchthrough` shows real state.
+`make-app.sh` also installs to `~/Applications`. A running copy keeps the image it
+launched with, so it has to be restarted before any of it is visible.
+
+**How to restart depends on how the app was started, and only one of the two is a
+daemon.** If `patchthrough install` set up the LaunchAgent, use
+`launchctl kickstart -k gui/$(id -u)/com.nicoherrera.patchthrough`. If the app was
+opened from Finder or a login item there is no service under that label, that
+command fails with "Could not find service", and the answer is to quit from the
+menu bar and open it again. `launchctl list | grep patchthrough` tells you which
+you have: a `application.com.nicoherrera.patchthrough.<pid>.<n>` row is the plain
+app, not an agent.
+
+Preferences live in the `com.nicoherrera.patchthrough` domain — the app is not
+sandboxed, so `defaults read com.nicoherrera.patchthrough` shows real state.
 
 Debug hooks (env vars, all off by default): `PATCHTHROUGH_DEBUG_WINDOW` logs the
 window frame, `PATCHTHROUGH_DEBUG_SETTINGS` opens the settings sheet at launch,
@@ -37,12 +47,30 @@ Read it before adding or changing any view.** The short version:
 - Dark mode only. No light variants, no `colorScheme` branches.
 - Selection is a filled row with a ring. Never a coloured left edge bar.
 - The verb is "Patch through to". Sentence case, no emoji.
+- **Customer-facing copy has no em dashes.** Use a period, a comma, or a colon.
+  This covers every string a user reads: notification titles and bodies, alert
+  text, menu items, window labels, `lastAction` status lines, Settings captions,
+  and the prose in `handoff.md`. Code comments and doc files are exempt.
+- **Every user-facing string starts with a capital**, including the half after a
+  colon in a notification title (`Patchthrough: Transcript ready`, not
+  `Patchthrough: transcript ready`) and short status lines (`Transcribing…`,
+  `Settings saved`, `Moved <name> to the Trash`). Strings that open with an
+  interpolated value are fine as they are. The exception is text that came from
+  somewhere else, like a Graph error echoed into a notification body: it is not
+  ours to recase.
 - Recording starts in the menu bar. The window titlebar carries a second
   record/stop control as a fallback, because macOS hides a `.variableLength`
   status item once the menu bar runs out of room and an `LSUIElement` app has no
   Dock icon to fall back on — menu bar only meant the primary action could become
   unreachable while the app was running. Both paths call the same `toggle()`.
   Don't delete the window control as a rule violation; it is the exception.
+- **The window is no longer review-only.** It was, when the only thing it did was
+  read finished transcripts. Notes changed that: they are typed *during* the
+  meeting, so `startSession()` brings the window up (`notes.open_window_on_record`,
+  default on) and selects the live session. Treat the window as a recording-time
+  surface when adding anything that a user does while a meeting is running, and
+  don't assume it is closed. Recording still *starts* in the menu bar; what
+  happens during a recording increasingly does not live there.
 - `PT.M.turnMaxWidthFraction = 0.78` is load-bearing — raising it silently breaks
   the me-right / them-left transcript layout.
 - Type sizes are fractional on purpose (14.5, 13.5, 12.5, 11.5, 10.5). Rounding
@@ -104,6 +132,13 @@ not a bug.
   RGB renders `#D2371B` as `#DD4D22`.
 - `Audio/` — mic + system-audio capture to two `.caf` tracks.
 - `Transcription/` — on-device Parakeet via CoreML.
+- `SessionNotes.swift` — notes the user types during a meeting, in `notes.json`.
+  Timestamps are absolute instants, never offsets; the transcript's zero moves
+  during recording. Read [docs/notes-and-the-recording-clock.md](docs/notes-and-the-recording-clock.md)
+  before touching anything that computes a note's position.
+- `TranscriptClock.swift` — the one place a millisecond offset becomes `[m:ss]`.
+  `transcript.md` and the handoff's notes section both print it and must agree,
+  or a note points at a line near the one it means.
 - `Handoff.swift` — stages a transcript into a repo and launches an agent.
 
 ## Conventions
