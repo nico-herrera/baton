@@ -99,11 +99,13 @@ struct SessionNotes: Equatable, Sendable {
 
     /// Read the notes and place them on the same clock `transcript.md` uses.
     ///
-    /// The anchor is `audio_start` — the first audio buffer of whichever track
+    /// The anchor is `audio_start`, the first audio buffer of whichever track
     /// delivered one first, which is exactly what every transcript timestamp is
     /// measured from. `started` is the fallback for sessions written before that
-    /// key existed; it is stamped before the audio devices are opened, so those
-    /// offsets land early by the device startup latency.
+    /// key existed. It is stamped before the audio devices are opened, so it is
+    /// the earlier instant and subtracting it overshoots: those notes read later
+    /// in the transcript than the moment they refer to, by the device startup
+    /// latency (1.6 s on one measured machine).
     static func resolved(in dir: URL) -> [Resolved] {
         guard let notes = read(from: dir)?.notes else { return [] }
         let anchor = audioStart(in: dir)
@@ -129,7 +131,7 @@ struct SessionNotes: Equatable, Sendable {
            let date = RecordingSession.isoMillisFormatter().date(from: stamp) {
             return date
         }
-        // Pre-audio_start sessions. Second precision and early by however long
+        // Pre-audio_start sessions. Second precision, and late by however long
         // the audio devices took to open, but far better than dropping the
         // timestamps entirely.
         if let stamp = json["started"] as? String {

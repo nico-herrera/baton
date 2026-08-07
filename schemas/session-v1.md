@@ -27,8 +27,9 @@ engine. Integrations must use the following public contract:
   opened; the gap between them is device startup latency and is not otherwise
   recoverable. A consumer converting a wall-clock instant into transcript time
   must subtract `audio_start`. Falling back to `started` when it is absent is
-  correct but lands early by that latency, so treat a converted timestamp as
-  approximate whenever the key is missing.
+  correct but overshoots by that latency, placing the note later in the
+  transcript than the moment it refers to (measured at 1.6 s on one machine), so
+  treat a converted timestamp as approximate whenever the key is missing.
 - `meta.json` can also contain `name`, the title the user gave the meeting.
   Treat it as optional: most sessions have no name. Prefer it over the
   directory name for anything a person or an agent reads. Keep using the

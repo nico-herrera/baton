@@ -187,8 +187,9 @@ function readNotes(sessionDir, meta) {
 
   // The transcript's zero is the first audio buffer (`audio_start`), not the
   // session start — `started` is stamped before the audio devices are opened.
-  // Sessions written before that key existed fall back to it and land early by
-  // the device startup latency, which beats dropping the timestamps entirely.
+  // Sessions written before that key existed fall back to it. `started` is the
+  // earlier instant, so those notes overshoot by the device startup latency and
+  // read later than the moment they refer to, which still beats dropping them.
   const anchor = Date.parse(typeof meta.audio_start === 'string' ? meta.audio_start : meta.started);
 
   return parsed.notes

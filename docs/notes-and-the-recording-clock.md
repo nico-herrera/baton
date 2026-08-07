@@ -31,8 +31,13 @@ to ignore, and until `audio_start` was persisted it was **computed and thrown aw
 `meta.json` recorded `started` and the inter-track offsets, but nothing that let a
 wall-clock instant be converted into transcript time.
 
-A note keyed off `store.elapsed` therefore lands early by that latency. It would look
-right — the number is plausible, the note is real — and it would point at the wrong line.
+A note keyed off `store.elapsed` therefore **overshoots** by that latency. `started` is
+the earlier instant, so subtracting it yields a larger offset, and the note is labelled
+further into the transcript than the moment it was reacting to. It would look right, the
+number is plausible and the note is real, and it would point at the wrong line.
+
+Measured on an M5, 2026-08-07: **1.640 s**. Enough to move a label a whole second at
+0:48 and two seconds at 1:01, which in a dense conversation is a different sentence.
 
 ## Why notes store an instant, not an offset
 
@@ -70,10 +75,13 @@ must agree:
 ## Known inaccuracies
 
 - **AAC encoder priming delay** is unaccounted for on both tracks. This is pre-existing
-  and affects `transcript.md` itself; notes inherit it. Sub-100 ms, below the resolution
-  anyone reads a `[m:ss]` label at, but it means these timestamps are not frame-accurate.
-- **Sessions written before `audio_start` existed** fall back to `started` and are early
-  by the device startup latency. Documented in `schemas/session-v1.md` as approximate.
+  and affects `transcript.md` itself; notes inherit it. Believed sub-100 ms and below the
+  resolution anyone reads a `[m:ss]` label at, but unmeasured, so treat these timestamps
+  as not frame-accurate. This is a separate effect from the 1.6 s device startup latency
+  above, which `audio_start` does cancel.
+- **Sessions written before `audio_start` existed** fall back to `started`, which
+  overshoots by the device startup latency: their notes read later than the moment they
+  refer to. Documented in `schemas/session-v1.md` as approximate.
 - **`firstBufferAt` is an unsynchronized cross-thread `Date?`** — written on the audio
   render thread and the tap queue, read on the main actor. Pre-existing; `audio_start`
   inherits it. The Windows sibling locks; the Swift side does not.
