@@ -36,8 +36,16 @@ the earlier instant, so subtracting it yields a larger offset, and the note is l
 further into the transcript than the moment it was reacting to. It would look right, the
 number is plausible and the note is real, and it would point at the wrong line.
 
-Measured on an M5, 2026-08-07: **1.640 s**. Enough to move a label a whole second at
-0:48 and two seconds at 1:01, which in a dense conversation is a different sentence.
+Measured on an M5, 2026-08-07, across two recordings minutes apart: **1.640 s** and
+**0.194 s**. That spread is the point. The latency is not a constant that could be
+corrected with a fixed offset, because it depends on how long the process tap, the
+aggregate device and `AVAudioEngine` happen to take on that launch. It has to be
+measured per session and written down, which is what `audio_start` is for. At 1.64 s it
+moved a label a full second at 0:48 and two seconds at 1:01, which in a dense
+conversation is a different sentence.
+
+End-to-end check on the same day: a note committed immediately after the spoken phrase
+"Flag this exact line." (transcript `[0:30]`) resolved to `0:32`, landing on that line.
 
 ## Why notes store an instant, not an offset
 
