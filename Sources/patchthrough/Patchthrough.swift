@@ -730,7 +730,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                     return
                 }
                 guard Handoff.launchGui(target: target, session: session, repo: nil) else {
-                    notifyUser(title: "Patchthrough: handoff failed",
+                    notifyUser(title: "Patchthrough: Handoff failed",
                                body: "Could not open \(target.label).")
                     return
                 }
@@ -743,7 +743,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                         finishPaste(app: appName, newChat: true)
                     } else {
                         notifyUser(
-                            title: "Patchthrough: handed to \(appName)",
+                            title: "Patchthrough: Handed to \(appName)",
                             body: target.manualTextPaste
                                 ? "Prompt + transcript are on your clipboard. Paste (⌘V) into the chat."
                                 : "The handoff file is on your clipboard. Paste (⌘V) into a new chat to attach it."
@@ -754,7 +754,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                         finishPaste(app: "Claude", newChat: false)
                     } else {
                         notifyUser(
-                            title: "Patchthrough: handed to Claude",
+                            title: "Patchthrough: Handed to Claude",
                             body: "New chat opened. Paste (⌘V) to attach the transcript."
                         )
                     }
@@ -765,7 +765,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                         finishPaste(app: browser, newChat: false, settle: 5)
                     } else {
                         notifyUser(
-                            title: "Patchthrough: handed to \(target.label)",
+                            title: "Patchthrough: Handed to \(target.label)",
                             body: "The handoff file is on your clipboard. Paste (⌘V) to attach it."
                         )
                     }
@@ -789,7 +789,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         do {
             try Handoff.stage(session: session, inRepo: repo)
         } catch {
-            notifyUser(title: "Patchthrough: handoff failed", body: "\(error)")
+            notifyUser(title: "Patchthrough: Handoff failed", body: "\(error)")
             return
         }
         Handoff.launchInTerminal(
@@ -853,13 +853,21 @@ final class AppController: NSObject, NSApplicationDelegate {
             FileHandle.standardError.write(Data("● recording → \(newSession.dir.path)\n".utf8))
         } catch {
             FileHandle.standardError.write(Data("recording start failed: \(error)\n".utf8))
-            notifyUser(title: "Patchthrough: recording failed", body: "\(error)")
+            notifyUser(title: "Patchthrough: Recording failed", body: "\(error)")
             return
         }
 
         menuBar.update(recording: true, elapsed: "0:00")
         store.isRecording = true
         store.elapsed = "0:00"
+        // Selects the live row, so the notes field is what the window is
+        // showing rather than whatever session was last read.
+        store.setLiveSession(session?.dir.lastPathComponent)
+        // Recording still starts in the menu bar, but the notes field lives in
+        // the window, and a note you have to go and find is a note nobody takes
+        // mid-sentence. Opening it here is what makes the feature reachable at
+        // all from its primary entry point.
+        if Config.notesOpenWindowOnRecord() { openWindow() }
         ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -877,7 +885,10 @@ final class AppController: NSObject, NSApplicationDelegate {
         ticker = nil
         menuBar.update(recording: false, elapsed: nil)
         store.isRecording = false
-        store.refresh()
+        // Clears the recording status and refreshes; the row becomes `pending`
+        // until the transcript lands. setLiveSession(nil) already refreshes, so
+        // there is no second call here.
+        store.setLiveSession(nil)
 
         let dir = session.dir
         Task { [transcription] in await transcription.enqueue(dir) }

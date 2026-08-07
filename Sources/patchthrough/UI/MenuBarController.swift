@@ -146,7 +146,7 @@ final class MenuBarController {
             }
             stateLabel.attributedTitle = s
             toggleItem.title = "Stop & transcribe"
-            toggleItem.subtitle = "mic + system audio · 2 tracks"
+            toggleItem.subtitle = "Mic + system audio · 2 tracks"
             toggleItem.image = Self.dotImage(square: true)
         } else {
             // The idle header is a dim status line, not a peer of the actions.
