@@ -47,6 +47,21 @@ transcript. The prompt tells the agent to extract work items, decisions, and
 ambiguities, to ask you before it guesses at a garbled term, and to change no code
 until you agree the plan.
 
+## Notes
+
+While a meeting records, you can type notes in the Patchthrough window. Each one is
+stamped against the recording, so a note taken at 2:14 points at the line the transcript
+labels `[2:14]`.
+
+Notes ride into the handoff in their own section, above the transcript. Nothing
+generates them, nothing rewrites them, and nothing summarizes them — they are your own
+words, and the transcript below them is still verbatim. A transcript records what was
+said; it has no way of knowing which two minutes of it you actually cared about. That is
+what the notes are for, and it is why the agent is told to prioritise by them and still
+treat the transcript as the record.
+
+Notes are optional. A session where you typed nothing produces no notes section at all.
+
 The transcript lands in `.meeting/` inside your repository. Patchthrough adds
 `.meeting/` to the repository's **local** git excludes. Meeting content cannot reach a
 commit by accident, and Patchthrough does not touch your `.gitignore`.

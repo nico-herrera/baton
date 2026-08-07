@@ -25,6 +25,11 @@ may select a different Standard engine, calibrations, or two-engine consensus on
 it carries qualifying release evidence. Without that evidence, both quality modes use
 the recoverable Parakeet baseline. No LLM rewrites transcript text.
 
+Nothing rewrites it, in fact. The notes a user types during a meeting are stored and
+rendered separately, in their own words, and never merge into `transcript.md` or
+`transcript.json`. They share the transcript's clock so a note can point at a line. See
+[`notes-and-the-recording-clock.md`](notes-and-the-recording-clock.md).
+
 Segmentation uses punctuation, pauses, confidence changes, and a 30-second safety
 boundary. Project vocabulary is bounded and derives from explicit glossaries,
 manifests, dependencies, filenames, branch names, and declarations. Parakeet can apply
